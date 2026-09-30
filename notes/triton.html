@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="WSJ 的 Triton 入门学习提纲。">
+    <meta name="theme-color" content="#0d0e10">
+    <title>Triton 入门 · WSJ</title>
+    <link rel="stylesheet" href="../assets/styles.css">
+    <script src="../assets/main.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="../" aria-label="WSJ 首页">WSJ<span class="brand-mark">.</span><small>NOTES</small></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../">首页</a><a class="is-active" href="../#notes">AI Infra</a><a href="../#about">关于</a>
+          <a class="nav-github" href="https://github.com/wsj040303" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+        </nav>
+      </div>
+    </header>
+    <main class="article-main article-shell" id="main">
+      <nav class="breadcrumbs" aria-label="面包屑导航"><a href="../">首页</a><span>/</span><a href="../#notes">AI Infra</a><span>/</span>Triton 入门</nav>
+      <div class="article-heading">
+        <p class="eyebrow">AI INFRA / 02 / KERNEL ENGINEERING</p>
+        <h1>Triton 入门</h1>
+        <p>从块级编程模型出发，尝试用 Triton 表达 GPU 算子。本页先列出学习路线，笔记正文会逐步补充。</p>
+      </div>
+      <div class="article-rule"></div>
+      <div class="article-note"><strong>当前状态</strong><span>专题提纲已建立，正文整理中。下面是计划覆盖的主题。</span></div>
+      <h2 class="outline-title">学习提纲</h2>
+      <ol class="outline-list">
+        <li><span class="outline-number">01</span><div><h3>Triton 的编程模型</h3><p>认识 Program、张量块以及它们与 CUDA 线程模型的联系。</p></div></li>
+        <li><span class="outline-number">02</span><div><h3>数据布局与访存</h3><p>练习加载、掩码、计算与存储，理解块形状对性能的影响。</p></div></li>
+        <li><span class="outline-number">03</span><div><h3>第一个算子</h3><p>从向量加法或简单归约开始，完成正确性验证与基础测试。</p></div></li>
+        <li><span class="outline-number">04</span><div><h3>性能比较</h3><p>学习设计基准测试，比较不同实现和参数配置。</p></div></li>
+      </ol>
+      <div class="article-actions"><a class="button button-primary" href="../#notes">← 返回专栏</a><button class="copy-button" type="button" data-copy-link>复制页面链接 ↗</button><span class="copy-status" data-copy-status role="status" aria-live="polite"></span></div>
+    </main>
+    <footer class="site-footer"><div class="shell footer-inner"><span>© <span data-year>2026</span> WSJ</span><span>AI INFRA / TRITON</span><a href="#main">回到顶部 ↑</a></div></footer>
+  </body>
+</html>

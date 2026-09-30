@@ -3,93 +3,56 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="WSJ 的 AI Infra 学习笔记，从 CUDA 到 Triton，记录概念、代码与实践。">
-    <meta name="theme-color" content="#0d0e10">
-    <title>WSJ · AI Infra 笔记</title>
-    <link rel="stylesheet" href="assets/styles.css">
-    <script src="assets/main.js" defer></script>
+    <meta name="description" content="WSJ 的个人主页与 AI Infra 学习笔记。">
+    <meta name="theme-color" content="#101113">
+    <title>首页 · WSJ</title>
+    <link rel="stylesheet" href="assets/site.css">
+    <script src="assets/site.js" defer></script>
   </head>
-  <body>
+  <body class="home-page">
     <a class="skip-link" href="#main">跳转到内容</a>
-    <header class="site-header">
-      <div class="shell header-inner">
-        <a class="brand" href="./" aria-label="WSJ 首页">WSJ<span class="brand-mark">.</span><small>NOTES</small></a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="./" aria-label="WSJ 首页">WSJ<span>.</span></a>
         <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
         <nav class="site-nav" id="site-nav" aria-label="主导航">
-          <a class="is-active" href="./" aria-current="page">首页</a>
-          <a href="#notes">AI Infra</a>
-          <a href="#about">关于</a>
-          <a class="nav-github" href="https://github.com/wsj040303" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+          <a href="./" aria-current="page">首页</a>
+          <a href="ai-infra/">AI Infra</a>
+          <a href="projects/">GitHub 项目</a>
+          <a href="resources/">推荐资料</a>
         </nav>
-      </div>
-    </header>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
 
-    <main id="main">
-      <section class="hero shell" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> PERSONAL NOTES / AI INFRA</p>
-          <h1 id="hero-title">理解系统，<br><span>从动手开始。</span></h1>
-          <p class="hero-description">这里记录我学习 AI Infrastructure 的过程：从 CUDA 的执行模型，到 Triton 的算子实现，逐步整理概念、代码和实践。</p>
-          <div class="hero-actions">
-            <a class="button button-primary" href="#notes">浏览笔记 <span aria-hidden="true">↘</span></a>
-            <a class="button button-text" href="https://github.com/wsj040303" target="_blank" rel="noopener noreferrer">访问 GitHub <span aria-hidden="true">↗</span></a>
+      <main class="home-main" id="main">
+        <div class="home-photo">
+          <div class="avatar-ring">
+            <img src="assets/avatar.jpg" alt="本站头像：黑白飞艇照片" width="577" height="577">
           </div>
-          <div class="hero-meta"><span>01 / AI INFRA</span><span>持续整理中</span></div>
+          <span class="photo-caption">WSJ / PERSONAL SPACE</span>
         </div>
-        <div class="hero-art">
-          <div class="portrait-frame">
-            <img src="assets/avatar.jpg" alt="博客头像：黑白飞艇照片" width="577" height="577">
-          </div>
-          <div class="art-label"><span>WSJ / VISUAL IDENTITY</span><span>01—03</span></div>
-        </div>
-      </section>
-
-      <section class="notes-section" id="notes" aria-labelledby="notes-title">
-        <div class="shell">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">NOTEBOOK / 001</p>
-              <h2 id="notes-title">AI Infra <span>笔记专栏</span></h2>
-            </div>
-            <p>从基础概念到实际编写算子。先搭好目录，内容会随着学习持续补充。</p>
-          </div>
-          <div class="topic-grid">
-            <a class="topic-card" href="notes/cuda.html">
-              <div class="card-top"><span class="card-number">01 / CUDA</span><span class="card-arrow" aria-hidden="true">↗</span></div>
-              <div class="card-content">
-                <p class="card-kicker">GPU PROGRAMMING</p>
-                <h3>CUDA 入门</h3>
-                <p>认识线程、线程块与内存层次，从第一个 Kernel 开始理解 GPU 并行计算。</p>
-              </div>
-              <div class="card-bottom"><span>执行模型</span><span>内存层次</span><span>基础 Kernel</span></div>
-            </a>
-            <a class="topic-card" href="notes/triton.html">
-              <div class="card-top"><span class="card-number">02 / TRITON</span><span class="card-arrow" aria-hidden="true">↗</span></div>
-              <div class="card-content">
-                <p class="card-kicker">KERNEL ENGINEERING</p>
-                <h3>Triton 入门</h3>
-                <p>从块级编程与张量布局出发，练习更直接地表达和优化 GPU 算子。</p>
-              </div>
-              <div class="card-bottom"><span>编程模型</span><span>数据布局</span><span>算子实践</span></div>
-            </a>
+        <div class="home-intro">
+          <p class="eyebrow">HELLO / 欢迎来到这里</p>
+          <h1>你好，我是 <span>WSJ.</span></h1>
+          <div class="intro-divider"></div>
+          <section aria-labelledby="bio-title">
+            <h2 id="bio-title">自我介绍</h2>
+            <p>东南大学研究生在读，通信专业。</p>
+          </section>
+          <section aria-labelledby="site-title">
+            <h2 id="site-title">这个网站</h2>
+            <p>这里主要整理 AI Infra 学习笔记，先从 CUDA 和 Triton 入门开始，之后会继续加入项目与推荐资料。</p>
+          </section>
+          <div class="home-contact">
+            <span>联系方式</span>
+            <a href="mailto:wsj040303@gmail.com">wsj040303@gmail.com <span aria-hidden="true">↗</span></a>
           </div>
         </div>
-      </section>
-
-      <section class="about-section shell" id="about" aria-labelledby="about-title">
-        <p class="eyebrow">ABOUT THIS SPACE</p>
-        <div class="about-grid">
-          <h2 id="about-title">边学边写，<br>留下可复用的理解。</h2>
-          <div>
-            <p>这个站点目前聚焦 AI Infra 学习笔记。专题页面会先以提纲形式建立结构，再逐篇补充经过验证的内容。</p>
-            <a class="inline-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer">查看本站代码 <span aria-hidden="true">↗</span></a>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="site-footer">
-      <div class="shell footer-inner"><span>© <span data-year>2026</span> WSJ</span><span>BUILT WITH CURIOSITY / HOSTED ON GITHUB PAGES</span><a href="#main">回到顶部 ↑</a></div>
-    </footer>
+      </main>
+      <div class="frame-bottom"><span>AI INFRA · NOTES · PROJECTS</span><span>01 / HOME</span></div>
+    </div>
   </body>
 </html>

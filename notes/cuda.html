@@ -3,42 +3,77 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="WSJ 的 CUDA 入门学习提纲。">
-    <meta name="theme-color" content="#0d0e10">
-    <title>CUDA 入门 · WSJ</title>
-    <link rel="stylesheet" href="../assets/styles.css">
-    <script src="../assets/main.js" defer></script>
+    <meta name="description" content="WSJ 的 CUDA 入门编程笔记与章节目录。">
+    <meta name="theme-color" content="#101113">
+    <title>CUDA 入门编程 · WSJ</title>
+    <link rel="stylesheet" href="../assets/site.css">
+    <script src="../assets/site.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">跳转到内容</a>
-    <header class="site-header">
-      <div class="shell header-inner">
-        <a class="brand" href="../" aria-label="WSJ 首页">WSJ<span class="brand-mark">.</span><small>NOTES</small></a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../" aria-label="WSJ 首页">WSJ<span>.</span></a>
         <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
         <nav class="site-nav" id="site-nav" aria-label="主导航">
-          <a href="../">首页</a><a class="is-active" href="../#notes">AI Infra</a><a href="../#about">关于</a>
-          <a class="nav-github" href="https://github.com/wsj040303" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+          <a href="../">首页</a><a href="../ai-infra/">AI Infra</a><a href="../projects/">GitHub 项目</a><a href="../resources/">推荐资料</a>
         </nav>
-      </div>
-    </header>
-    <main class="article-main article-shell" id="main">
-      <nav class="breadcrumbs" aria-label="面包屑导航"><a href="../">首页</a><span>/</span><a href="../#notes">AI Infra</a><span>/</span>CUDA 入门</nav>
-      <div class="article-heading">
-        <p class="eyebrow">AI INFRA / 01 / GPU PROGRAMMING</p>
-        <h1>CUDA 入门</h1>
-        <p>从 GPU 的执行模型开始，逐步建立 CUDA 编程的基本图景。本页先列出学习路线，笔记正文会逐步补充。</p>
-      </div>
-      <div class="article-rule"></div>
-      <div class="article-note"><strong>当前状态</strong><span>专题提纲已建立，正文整理中。下面是计划覆盖的主题。</span></div>
-      <h2 class="outline-title">学习提纲</h2>
-      <ol class="outline-list">
-        <li><span class="outline-number">01</span><div><h3>GPU 与 CUDA 执行模型</h3><p>理解 Host、Device、Kernel，以及 Grid、Block、Thread 的关系。</p></div></li>
-        <li><span class="outline-number">02</span><div><h3>内存层次与数据移动</h3><p>梳理全局内存、共享内存、寄存器及常见的数据访问问题。</p></div></li>
-        <li><span class="outline-number">03</span><div><h3>第一个 Kernel</h3><p>从向量加法出发，练习编写、调用并验证一个 CUDA Kernel。</p></div></li>
-        <li><span class="outline-number">04</span><div><h3>性能分析与优化</h3><p>建立吞吐、访存、并行度和基准测试的基本概念。</p></div></li>
-      </ol>
-      <div class="article-actions"><a class="button button-primary" href="../#notes">← 返回专栏</a><button class="copy-button" type="button" data-copy-link>复制页面链接 ↗</button><span class="copy-status" data-copy-status role="status" aria-live="polite"></span></div>
-    </main>
-    <footer class="site-footer"><div class="shell footer-inner"><span>© <span data-year>2026</span> WSJ</span><span>AI INFRA / CUDA</span><a href="#main">回到顶部 ↑</a></div></footer>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../">首页</a><span>/</span><a href="../ai-infra/">AI Infra</a><span>/</span>CUDA 入门编程</nav>
+        <div class="reader-heading">
+          <p class="eyebrow">AI INFRA / 01</p>
+          <h1>CUDA 入门编程</h1>
+          <p>在章节目录中选择内容阅读。当前先建立目录结构，后续逐章补充笔记。</p>
+        </div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>章节目录</summary>
+              <nav aria-label="CUDA 章节目录">
+                <ol class="chapter-list">
+                  <li><a href="#overview"><small>00</small> 专题概览</a></li>
+                  <li><a href="#execution"><small>01</small> 执行模型</a></li>
+                  <li><a href="#memory"><small>02</small> 内存层次</a></li>
+                  <li><a href="#first-kernel"><small>03</small> 第一个 Kernel</a></li>
+                  <li><a href="#performance"><small>04</small> 性能分析</a></li>
+                </ol>
+              </nav>
+            </details>
+          </aside>
+          <article class="reader-content">
+            <span class="article-state">专题提纲 · 正文持续整理中</span>
+            <h2 id="overview">从这里开始</h2>
+            <p>这个专题计划从 CUDA 的执行模型出发，逐步走到基础 Kernel 的编写与性能分析。下面各节目前是内容提要。</p>
+            <section id="execution">
+              <p class="section-label">CHAPTER 01</p>
+              <h3>执行模型</h3>
+              <p>梳理 Host、Device、Kernel，以及 Grid、Block、Thread 的组织关系。</p>
+            </section>
+            <section id="memory">
+              <p class="section-label">CHAPTER 02</p>
+              <h3>内存层次</h3>
+              <p>整理全局内存、共享内存、寄存器等常见存储位置与数据移动方式。</p>
+            </section>
+            <section id="first-kernel">
+              <p class="section-label">CHAPTER 03</p>
+              <h3>第一个 Kernel</h3>
+              <p>以简单运算为例，记录编写、调用和验证 CUDA Kernel 的基本流程。</p>
+            </section>
+            <section id="performance">
+              <p class="section-label">CHAPTER 04</p>
+              <h3>性能分析</h3>
+              <p>逐步补充基准测试、访存与并行度等性能分析基础。</p>
+            </section>
+            <div class="reader-actions"><a href="../ai-infra/">← 返回 AI Infra</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+      <div class="frame-bottom"><span>AI INFRA / CUDA</span><span>03 / READING</span></div>
+    </div>
   </body>
 </html>

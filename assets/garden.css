@@ -1,0 +1,175 @@
+/* Warm green and cream theme. Layout rules remain in site.css. */
+:root {
+  color-scheme: light;
+  --bg: #eee9d8;
+  --frame: #fcf8ed;
+  --panel: #e9f1df;
+  --panel-hover: #dcebd0;
+  --line: #cedbc4;
+  --text: #193b2a;
+  --muted: #4d6653;
+  --soft: #68806d;
+  --accent: #327d4b;
+  --forest: #1e5338;
+  --cream: #fffaf0;
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 16%, #dce8c6 0, transparent 26%),
+    radial-gradient(circle at 92% 84%, #e4d8b8 0, transparent 28%),
+    var(--bg);
+}
+::selection { background: #b9d998; color: var(--text); }
+:focus-visible { outline-color: var(--accent); }
+.skip-link { background: var(--forest); color: var(--cream); }
+.site-frame {
+  border-color: #c2d1b9;
+  border-radius: 22px;
+  background: radial-gradient(circle at 94% 27%, #eef2dd 0, transparent 25%), var(--frame);
+  box-shadow: 0 22px 70px #46654824;
+}
+.site-header {
+  border-bottom-color: #185035;
+  border-radius: 21px 21px 0 0;
+  background:
+    radial-gradient(circle at 18% 130%, #3d7950 0, transparent 29%),
+    linear-gradient(115deg, #194b33, #276443);
+  color: var(--cream);
+}
+.brand span { color: #cbe986; }
+.site-nav a, .site-nav a:first-child { border-color: #ffffff35; color: #f5f3e5; }
+.site-nav a:hover, .site-nav a[aria-current="page"] { color: #d7f19f; }
+.star-link { border-color: #d8e9c188; color: var(--cream); border-radius: 999px; }
+.star-link:hover { border-color: #e1f5b8; background: #ffffff20; color: #e1f5b8; }
+
+/* The portrait is framed by two leaves; the dots repeat in page headings. */
+.home-main { position: relative; isolation: isolate; }
+.home-main::after,
+.catalog-main::after,
+.reader-main::after {
+  content: "";
+  position: absolute;
+  width: 94px;
+  height: 94px;
+  background: radial-gradient(#81ab70 2px, transparent 2.5px) 0 0 / 15px 15px;
+  opacity: .34;
+  pointer-events: none;
+}
+.home-main::after { top: 36px; right: 42px; }
+.home-photo { position: relative; isolation: isolate; }
+.home-photo::before, .home-photo::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 105px;
+  height: 150px;
+  border-radius: 100% 0 100% 0;
+  background: #c6dcae;
+}
+.home-photo::before { top: -32px; left: -35px; transform: rotate(-27deg); }
+.home-photo::after { right: -38px; bottom: -34px; transform: rotate(153deg); background: #dfe9c1; }
+.avatar-ring {
+  border: 2px solid #47865b;
+  background: #f7f4e7;
+  box-shadow: 0 0 0 12px #dce9cc, 0 0 0 14px #9fbe98;
+}
+.avatar-ring img { filter: grayscale(1) contrast(1.06) brightness(.93); }
+.home-intro h1 { color: var(--text); }
+.home-intro h1 span {
+  color: var(--accent);
+  background: linear-gradient(transparent 72%, #d7e9a7 72%);
+}
+.intro-divider { height: 6px; width: 86px; border-radius: 999px; background: #7bab58; }
+.home-intro h2 { color: var(--forest); }
+.home-intro h2::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 10px; border-radius: 50%; background: #75aa58; vertical-align: 2px; }
+.home-intro p { color: var(--muted); }
+.home-contact { margin-top: 33px; padding: 17px 20px; border: 1px solid #c6d9bd; border-radius: 14px; background: #eaf2df; }
+.home-contact > span { color: var(--soft); }
+.home-contact a { border-color: var(--accent); color: var(--forest); }
+.home-contact a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Topic cards use alternating warm surfaces and a visible link arrow. */
+.catalog-main { position: relative; }
+.catalog-main::after { top: 37px; right: 8%; }
+.page-heading h1, .reader-heading h1, .placeholder-main h1 { color: var(--forest); }
+.page-heading h1::after, .reader-heading h1::after {
+  content: "";
+  display: block;
+  width: 78px;
+  height: 7px;
+  margin-top: 20px;
+  border-radius: 999px;
+  background: #91bc68;
+}
+.catalog-box { border-color: #cbd9c3; border-radius: 22px; background: #fffdf6; box-shadow: 0 12px 35px #385d3610; }
+.topic-card { position: relative; border-color: #cadbc1; border-radius: 17px; background: #eaf2df; box-shadow: 0 8px 18px #335c2810; }
+.topic-card:nth-child(even) { background: #f7efda; border-color: #e3d9bc; }
+.topic-card::before { content: ""; position: absolute; top: 23px; left: 24px; width: 30px; height: 5px; border-radius: 10px; background: #7aac61; }
+.topic-card::after { content: "↗"; position: absolute; top: 14px; right: 21px; color: #38794d; font-size: 21px; }
+.topic-card:hover { border-color: #6da964; background: #e2efd2; box-shadow: 0 15px 28px #335c2826; }
+.topic-card:nth-child(even):hover { background: #f4e7c8; }
+.topic-card h2 { color: var(--forest); }
+.topic-card p, .catalog-note { color: var(--muted); }
+
+/* A green chapter rail contrasts with the cream reading surface. */
+.reader-main { position: relative; }
+.reader-main::after { top: 28px; right: 5%; }
+.breadcrumb { color: #58755d; }
+.breadcrumb a:hover { color: var(--accent); }
+.breadcrumb span { color: #88ab78; }
+.reader-grid { border-color: #cbd9c3; border-radius: 19px; background: #fffdf7; box-shadow: 0 14px 42px #385d3617; }
+.chapter-sidebar { border-right-color: #1c5036; border-radius: 18px 0 0 18px; background: #245a3d; color: var(--cream); }
+.chapter-panel summary { border-bottom-color: #ffffff35; }
+.chapter-panel summary::after { color: #d5ebb4; }
+.chapter-list li a { color: #eef4df; }
+.chapter-list li a:hover, .chapter-list li a.is-current { background: #d7e9b7; color: #1a4a30; }
+.reader-content { background: #fffdf7; border-radius: 0 18px 18px 0; }
+.reader-content h2, .reader-content section h3, .reader-content section h4 { color: var(--forest); }
+.reader-content section h3 { padding-left: 14px; border-left: 5px solid #83b763; }
+.reader-content > p, .reader-content section p, .reader-content section ul, .reader-content section ol { color: #354f3c; }
+.reader-content section { border-top-color: #d7e2ce; }
+.reader-content section li::marker { color: var(--accent); }
+.reader-actions a { border-color: var(--accent); color: var(--forest); }
+.reader-actions a:hover { color: var(--accent); border-color: var(--accent); }
+.reader-content code { border-color: #d4e3c9; background: #eff5e8; color: #206e3d; }
+.reader-content a.inline-link { border-color: #77a76d; color: #236c40; }
+.reader-content a.inline-link:hover { color: #144f30; border-color: #144f30; }
+
+/* Keep code dark to preserve the distinct syntax colors. */
+.code-block { border-color: #557861; border-radius: 11px; background: #10251b; overflow: hidden; }
+.code-block > figcaption { border-bottom-color: #46634d; background: #224733; color: #f2f3df; }
+.code-block > figcaption .code-lang { color: #c8e3b9; }
+.code-block pre { background: #10251b; }
+.code-block code { padding: 0; border: 0; background: transparent; color: #e7efe2; font-size: 12.5px; }
+.code-block .tok-comment { color: #a5bea8; }
+.code-note { color: var(--muted); }
+.formula { border-color: #9fc594; border-radius: 11px; background: #eef5e6; color: #275e3b; }
+.callout { border-color: #c6dfbc; border-left-color: #5c9c5f; border-radius: 0 12px 12px 0; background: #edf5e7; }
+.callout p { color: #36553e; }
+.callout .callout-title { color: var(--forest); letter-spacing: 0; }
+.reader-content thead th { border-bottom-color: #32724a; background: #286443; color: #fff9eb; }
+.reader-content tbody td { border-bottom-color: #dbe5d5; color: #354f3c; }
+.reader-content tbody tr:hover td { background: #edf5e6; }
+.reader-content tbody tr.is-best td { color: #174a2e; font-weight: 700; }
+.reader-content tbody tr.is-best td:first-child { box-shadow: inset 3px 0 0 #6da861; }
+
+.placeholder-main { position: relative; background: radial-gradient(circle at 83% 62%, #e5efcf 0 13%, transparent 13.3%); }
+.placeholder-main p { color: var(--muted); }
+.placeholder-main a { border-color: var(--accent); color: var(--forest); }
+
+@media (max-width: 850px) {
+  .site-nav { border-bottom-color: #185035; background: #245a3d; }
+  .site-nav a, .site-nav a:first-child { color: var(--cream); }
+}
+@media (max-width: 650px) {
+  .site-frame { border-radius: 0; }
+  .site-header { border-radius: 0; }
+  .home-main::after, .catalog-main::after, .reader-main::after { width: 60px; height: 60px; opacity: .24; }
+  .home-photo::before, .home-photo::after { width: 75px; height: 110px; }
+  .breadcrumb { flex-wrap: wrap; gap: 6px 9px; }
+  .reader-grid { border-radius: 14px; }
+  .chapter-sidebar { border-right: 0; border-bottom-color: #1c5036; border-radius: 13px 13px 0 0; }
+  .reader-content { border-radius: 0 0 13px 13px; }
+  .code-block code { font-size: 11.5px; }
+}

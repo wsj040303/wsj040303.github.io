@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="CUDA reduce 归约求和算子精读：v0 到 v8 九个版本的代码拆解，以及 RTX 5070 上的实测性能对比。">
-    <meta name="theme-color" content="#101113">
+    <meta name="theme-color" content="#0b2015">
     <title>Reduce 归约求和 · 从 43% 到 94% 带宽 · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css">
     <script src="../../assets/site.js" defer></script>
@@ -26,9 +26,7 @@
       <main class="reader-main" id="main">
         <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>Reduce 归约求和</nav>
         <div class="reader-heading">
-          <p class="eyebrow">AI INFRA / OPERATORS / 01</p>
           <h1>Reduce 归约求和</h1>
-          <p>把 33,554,432 个 float 收成一个数。九个版本从 43% 带宽占用爬到 94%，本机实测 2.20× 加速——以及为什么前两个“标准优化”在这张卡上完全不起作用。</p>
         </div>
         <div class="reader-grid">
           <aside class="chapter-sidebar">
@@ -36,26 +34,24 @@
               <summary>章节目录</summary>
               <nav aria-label="本文章节目录">
                 <ol class="chapter-list">
-                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
-                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
-                  <li><a href="#full"><small>02</small> 完整代码</a></li>
-                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
-                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                  <li><a href="#what">算子在做什么</a></li>
+                  <li><a href="#walk">代码逐段解析</a></li>
+                  <li><a href="#full">完整代码</a></li>
+                  <li><a href="#perf">实测性能对比</a></li>
+                  <li><a href="#summary">小结</a></li>
                 </ol>
               </nav>
             </details>
           </aside>
           <article class="reader-content">
-            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
             <section id="what">
-              <p class="section-label">CHAPTER 01</p>
               <h3>算子在做什么，先看一个算例</h3>
               <p>Reduce（归约）就是把一个数组“收”成一个数的运算：求和、求最大值、求平均值都属于它。叫“归约”是因为每算一步，元素的个数就少一些，最后收敛到一个标量。这篇文章只看最简单也最常用的那个——<strong>求和</strong>。</p>
               <p>它在深度学习里出现的频率比想象中高：LayerNorm 要算均值与方差、Softmax 要算指数和、损失函数要把整个 batch 的误差加起来。这些地方的共同点是——数据在显存里躺着，而结果只有一个数。</p>
               <div class="formula">输入：a[0], a[1], ..., a[n-1]
 输出：s = a[0] + a[1] + ... + a[n-1]      （一个标量）</div>
               <p>任务本身没有难度，难的是<strong>怎么让几千个线程一起算一个和，还不互相踩</strong>。这才是 Reduce 成为 CUDA 优化经典入门题的原因。</p>
-<h4>一个可以手工核对的算例</h4>
+              <h4>一个可以手工核对的算例</h4>
               <p>先看 8 个数的求和。串行做法是一条 7 步的加法链：</p>
               <div class="formula">串行（一条链，7 步）：
 (((((((a0+a1)+a2)+a3)+a4)+a5)+a6)+a7)
@@ -76,7 +72,7 @@ delta =  1 :  lane0 += lane1    →  lane0 拿到全部 32 份的和
 
 5 步之后只有 lane0 的值是完整结果，其余 lane 手里的都是“半成品”。
 每一轮都是一条 __shfl_down_sync 指令，32 个 lane 同时完成一次配对加法。</div>
-<h4>为什么不是一个 kernel 干完</h4>
+              <h4>为什么不是一个 kernel 干完</h4>
               <p>GPU 上<strong>没有跨 block 的同步机制</strong>：一个 kernel 里的不同 block 谁先谁后跑完、能不能同时驻留，都不保证。所以一个 block 没法安全地去读另一个 block 的结果。既然不能在一次启动里收成 1 个数，那就分两步走：</p>
               <div class="formula">阶段 1：开很多 block，每个 block 负责一段数据，各出一个“部分和”
         （长度 n 的数组 → 长度 block_num 的部分和数组）
@@ -87,10 +83,9 @@ delta =  1 :  lane0 += lane1    →  lane0 拿到全部 32 份的和
               <div class="callout"><span class="callout-title">这篇的实测环境</span><p>RTX 5070（sm_120，理论峰值带宽 672 GB/s）+ CUDA 13.4 + nvcc 13.4。所有耗时都是本机实测：每个 kernel 连跑 13 次，丢掉前 3 次热身，取后 10 次的最小值，只计 kernel、不含 <code>cudaMemcpy</code>。</p></div>
             </section>
             <section id="walk">
-              <p class="section-label">CHAPTER 02</p>
               <h3>代码逐段解析（v8）</h3>
               <p>下面按“数据怎么进来 → 怎么累加 → 怎么收成一个数 → 怎么启动”的顺序拆 v8。引用行号对应本节末尾“完整代码”里的那份 <code>reduce_v8_shfl_down_sync_pack.cpp</code>。</p>
-<h4>① Packed：把 4 个 float 当成一个单位</h4>
+              <h4>① Packed：把 4 个 float 当成一个单位</h4>
               <p>性能问题的根源在这里就解决了大半。如果一次只搬 1 个 float（4 字节），访存通路就用不满；把相邻的 4 个 float 打包成 16 字节，一次搬完，指令条数直接除以 4。</p>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 50-78</span><span class="code-lang">CUDA C++</span></figcaption>
@@ -126,7 +121,7 @@ struct alignas(sizeof(T) * pack_size) Packed {
               </figure>
               <p><code>alignas(sizeof(T) * pack_size)</code> 是这一整段的开关。它把结构体的对齐要求抬到 16 字节——没有它，<code>Packed&lt;float, 4&gt;</code> 只按成员最大对齐（4 字节），编译器不敢假设这个对象落在 16 字节边界上，于是发不出 128 位的访存指令，打包就白做了。</p>
               <p>匿名 <code>union</code> 里只有一个成员 <code>elem</code>，写法上等价于直接写 <code>T elem[pack_size];</code>，作用是让 <code>p.elem[i]</code> 能直接用。文件里第 9-16 行那两组重复的 <code>#define</code> 是抄写时留下的重复，值完全相同，重复定义同一常量在 C++ 里合法，编译不出错，但确实该删。</p>
-<h4>② GetNumBlocks：block 数不写死，按硬件规格算</h4>
+              <h4>② GetNumBlocks：block 数不写死，按硬件规格算</h4>
               <p>v0~v6 都是“数据量 ÷ 每 block 元素数”直接算出 131072 个 block。block 开太多并不好：每个 block 都有启动开销，而显存带宽是固定的，塞进去的 block 超出 SM 的承载能力只会排队。OneFlow 的做法是反过来——先问硬件能同时装下多少线程，再决定开几个 block。</p>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 23-47</span><span class="code-lang">CUDA C++</span></figcaption>
@@ -162,7 +157,7 @@ int64_t GetNumBlocks(int64_t n) {
 RTX 5070：SM 48 个 × 每 SM 1536 线程 ÷ 256 × 1 = 288 个 block
 （v0~v6 用的是 131072 个，相差 455 倍）</div>
               <p>代码里 <code>std::min</code> 取“够用就好”的那个，<code>std::max(1, ...)</code> 兜底防止数据量太小时算出 0 个 block。注意本机打印的是 288，而注释里写的“864 个 block”是 A100（108 个 SM）的数字——这段注释是从 A100 上抄过来的，没跟着机器更新。</p>
-<h4>③ kernel 主体：网格步长循环 + 打包累加</h4>
+              <h4>③ kernel 主体：网格步长循环 + 打包累加</h4>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 106-128</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>__global__ void reduce_v8(float *g_idata,float *g_odata, unsigned int n){
@@ -193,7 +188,7 @@ RTX 5070：SM 48 个 × 每 SM 1536 线程 ÷ 256 × 1 = 288 个 block
               <p>循环写成 <code>linear_index += blockDim.x * gridDim.x</code> 这种“网格步长”形式，好处是 kernel 不挑 grid 大小：block 少了每个线程多绕几圈，block 多了每线程少绕几圈，结果都一样。这也正是 <code>GetNumBlocks</code> 敢把 block 数压到 288 的前提。</p>
               <p>访存模式和 v0 的树形归约完全不同：<strong>相邻线程读相邻的 pack</strong>。一个 warp 的 32 个 lane 一次读 32 个 pack = 512 字节连续内存，正好是 4 条完整的 128 字节事务，合并度 100%。这一句是整个优化里最值钱的地方。</p>
               <p>注意累加发生在 <code>sum_pack</code> 这个寄存器里的 pack 上——4 个 float 各自独立累加，<strong>4 路并行</strong>，不会像单个 float 累加那样被一条依赖链卡住。</p>
-<h4>④ PackReduce：把 4 个分量收成 1 个</h4>
+              <h4>④ PackReduce：把 4 个分量收成 1 个</h4>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 80-91</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【PackReduce：把一个 pack 压成 1 个 T】就是把这 4 个 lane 加起来。
@@ -210,7 +205,7 @@ __device__ T PackReduce(Packed&lt;T, pack_size&gt; pack){
 }</code></pre>
               </figure>
               <p>三步串行加法。看起来是加了 3 步延迟，但前面几百次累加都是 4 路并行的，这里只是收尾一次，摊销下来可以忽略。</p>
-<h4>⑤ warpReduceSum：warp 内的 5 步归约</h4>
+              <h4>⑤ warpReduceSum：warp 内的 5 步归约</h4>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 93-104</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【warp 内归约：这一版换成了循环写法】与 v7 的 5 个 if 相比：
@@ -228,7 +223,7 @@ __device__ T warpReduceSum(T val){
               </figure>
               <p><code>__shfl_down_sync(mask, val, delta)</code> 的语义是：每个 lane 从“自己下标 + delta”那个 lane 取一个值回来。配合 <code>val += </code>，delta 从 16 减到 1 走完 5 步，lane0 手里就是 32 份的和。</p>
               <p>这里和 v7 有个区别值得点出：v7 用 5 个 <code>if (WarpSize &gt;= N)</code> 配模板参数，把用不到的步数在编译期剪掉；v8 改成了定长 5 步的循环，每次都用 <code>0xffffffff</code> 全掩码。为什么敢这么写——因为第二级归约时只有 8 个值有效，lane 8~31 手里是 0（见下面第 ⑥ 段的三元表达式），多走的几步只是在加 0，不影响结果。代价是固定 5 步、换来实现简单。</p>
-<h4>⑥ 跨 warp 收尾：shared memory + 一个栅栏</h4>
+              <h4>⑥ 跨 warp 收尾：shared memory + 一个栅栏</h4>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 130-147</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>    static __shared__ float warpLevelSums[kWarpSize];
@@ -261,7 +256,7 @@ warpId = threadIdx.x / 32       本线程属于第几个 warp
 ⑤ threadIdx.x==0 写回 g_odata[blockIdx.x]</div>
               <p>第 ④ 步那句三元表达式 <code>(threadIdx.x &lt; blockDim.x / kWarpSize) ? warpLevelSums[laneId] : 0</code> 是关键：只有前 8 个线程取到真值，第 8~31 号线程取 0。这样 0 号 warp 拼出来的是一个 32 长度的向量，前 8 位有效、后面全是 0，正好能喂给第 ⑤ 步那个定长 5 步的 <code>warpReduceSum</code>。</p>
               <div class="callout"><span class="callout-title">这里为什么要两次 __syncthreads</span><p>第一次栅栏（第 137 行）在 <code>warpLevelSums[warpId] = sum</code> <strong>之前</strong>：它保证所有 warp 都已经算完自己的 <code>warpReduceSum</code>，避免某个慢 warp 的值还没算好就被别人读走。</p><p>第二次栅栏（第 141 行）在写入<strong>之后</strong>：保证 8 个值都写进 shared memory 了，0 号 warp 才能安全地读。这两道栅栏缺一个都会读到脏数据，而且这种错是间歇性的，很难查。</p></div>
-<h4>⑦ main：两阶段启动</h4>
+              <h4>⑦ main：两阶段启动</h4>
               <figure class="code-block">
                 <figcaption><span>reduce_v8_shfl_down_sync_pack.cpp : 164-217</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>int main(){
@@ -324,7 +319,6 @@ warpId = threadIdx.x / 32       本线程属于第几个 warp
               <p>对拍用的标准答案是等差数列求和公式 <code>N*(a[0]+a[N-1])/2</code>，这里输入是 <code>a[i] = i</code>。注意 <code>check()</code> 用的是精确相等比较（<code>out[i] != res[i]</code>），浮点求和本来就有舍入误差，这个对拍能过是因为两边恰好都算出了同一个值——它很脆，换个数据分布或换个 block 数就可能失败。这属于“验证代码”而不是“产品代码”。</p>
             </section>
             <section id="full">
-              <p class="section-label">CHAPTER 03</p>
               <h3>完整代码</h3>
               <p>下面是 v8 的完整实现，即仓库里的 <code>reduce/v8/reduce_v8_shfl_down_sync_pack.cpp</code>，一字未改（保留了原有的中文注释和那两组重复的 <code>#define</code>）。</p>
               <p>这段代码前面出现的 <code>#include &lt;cuda.h&gt;</code>、<code>&lt;time.h&gt;</code>、<code>&lt;iostream&gt;</code>、<code>&lt;cuda_fp16.h&gt;</code> 在本文件里其实都没用到，是随模板一起带过来的。</p>
@@ -551,10 +545,9 @@ int main(){
               <div class="callout"><span class="callout-title">怎么把这份代码跑起来</span><p>文件扩展名是 <code>.cpp</code>，nvcc 会按纯 C++ 处理，认不出 <code>__global__</code> 和 <code>&lt;&lt;&lt;&gt;&gt;&gt;</code>，直接编会报一堆 “threadIdx was not declared” —— 必须加 <code>-x cu</code> 强制走 CUDA 前端：</p><p><code>nvcc -x cu -arch=sm_120 -O3 -o reduce_v8 reduce_v8_shfl_down_sync_pack.cpp &amp;&amp; ./reduce_v8</code></p><p>另外这份文件里<strong>没有计时代码</strong>（它只打印 block 数和对拍结果），本文表格里的 v8 耗时是我另加了一段与 v0~v7 完全相同的计时后才测出来的。</p></div>
             </section>
             <section id="perf">
-              <p class="section-label">CHAPTER 04</p>
               <h3>实测性能对比分析</h3>
               <p>数据规模统一为 <code>N = 32×1024×1024 = 33,554,432</code> 个 float（输入 128 MiB），每个 kernel 跑 13 次取后 10 次最小值。带宽按“读取的 134.2 MB ÷ 耗时”算，理论峰值取 RTX 5070 的 672 GB/s。</p>
-<h4>本机实测（RTX 5070）</h4>
+              <h4>本机实测（RTX 5070）</h4>
               <div class="table-scroll">
                 <table>
                   <thead><tr><th>版本</th><th>这一版做了什么</th><th class="num">耗时 (µs)</th><th class="num">等效带宽 (GB/s)</th><th class="num">占峰值</th><th class="num">相对 v0</th></tr></thead>
@@ -572,7 +565,7 @@ int main(){
                 </table>
               </div>
               <p>先给一个参照物：同一台机器上纯 <code>float4</code> 设备间拷贝（等量读+写）能跑出 575 GB/s。reduce 是几乎纯读的负载（读 128 MiB、写几百字节），所以能跑得更高——v8 的 634 GB/s 已经是这台卡的读带宽上限附近了。</p>
-<h4>四个台阶，和它们各自的理由</h4>
+              <h4>四个台阶，和它们各自的理由</h4>
               <p><strong>第一台阶：v0 → v2 几乎没动（465 → 458 µs），v1 反而更慢了。</strong>这一段最容易被误解成“优化无效”。其实 v1/v2 修的是<strong>分支发散</strong>——v0 用 <code>tid % (2*s) == 0</code> 做判据，同一个 warp 里一半线程干活一半闲置；v1 换成 <code>index = 2*s*tid</code> 消除了取模，却让访存地址变成跨步的，撞上 shared memory 的 bank conflict，快了发散、慢了访存，净效果是慢了 8%。v2 把判据改成 <code>if (tid &lt; s)</code> 且 s 递减，地址重新连续、bank conflict 归零，才勉强追平 v0。</p>
               <p>根因是这三个版本的瓶颈根本不在同一处：它们都还在用“一个 block 认领 256 个元素、开 131072 个 block”这种碎粒度划分，访存还没喂饱，归约本身的开销就显不出来。<strong>换句话说，前面几版优化的是一个还没成为瓶颈的东西。</strong></p>
               <p><strong>第二台阶：v3 一次性砍掉一半（458 → 241 µs）。</strong>v3 让装载阶段空闲的线程多算一次（<code>sdata[tid] = g_idata[i] + g_idata[i+blockDim.x]</code>），一个 block 认领的元素从 256 变成 512，block 数直接减半。这一版的收益比 v1+v2 加起来大得多，因为它改的是<strong>划分粒度</strong>，而不是某条指令。</p>
@@ -580,7 +573,7 @@ int main(){
               <p><strong>第四台阶：v6/v7/v8 基本重合（211.7~212.0 µs）。</strong>这三版各有明确改进——v6 把每线程处理量提到 128 个元素、block 数从 65536 降到 1024；v7 把 warp 内归约换成 <code>__shfl_down_sync</code>、shared memory 写入量从 256 个降到 8 个；v8 加上 16 字节打包和自动 block 数。但耗时几乎没变，因为<strong>已经撞到显存带宽的上限</strong>：94.3% 的峰值占用率，再优化计算侧也不会更快了。</p>
               <div class="callout"><span class="callout-title">为什么 v8 只比 v6 快 0.05%</span><p>v6 的装载循环写成 128 次寄存器累加，ptxas 已经把它合并成“寄存器里加 128 次、最后写一次 shared memory”，所以 v8 用 16 字节 pack 省下的访存指令，在 v6 里其实也已经被合并掉了大半。带宽到顶之后，这些差异都落在测量噪声里。</p></div>
               <p>v8 的两阶段合计耗时是 212.8 µs，只比阶段 1 单独跑（211.7 µs）多 1.1 µs——阶段 2 只处理 288 个数，相对 128 MiB 的主循环可以忽略。这也说明为了“收成一个数”付出的额外代价很小。</p>
-<h4>和 A100 上的数据对照</h4>
+              <h4>和 A100 上的数据对照</h4>
               <p>仓库 README 里有一份原作者在 A100-PCIE-40GB（峰值带宽 1555 GB/s，CUDA 11.8）上用 Nsight Compute 测的数据。同代码、同数据规模，两张卡上的曲线形状很不一样：</p>
               <div class="table-scroll">
                 <table>
@@ -603,10 +596,9 @@ int main(){
               <div class="callout"><span class="callout-title">跨卡比较的注意事项</span><p>绝对耗时和加速比<strong>不能跨卡直接比</strong>——它们同时受显存带宽、SM 数量、bank 结构、编译器版本影响。有意义的是看<strong>同一张卡上</strong>每一版相对前一版的方向和幅度，以及背后的原因是否成立。</p></div>
             </section>
             <section id="summary">
-              <p class="section-label">CHAPTER 05</p>
               <h3>小结</h3>
               <p>Reduce 的九个版本，本质上是三次不同层面的改动：</p>
-<div class="callout"><span class="callout-title">三次改动</span><p><strong>改访存模式</strong>（v1、v2）：修分支发散、消 bank conflict。在本机这张卡上收益接近零，因为瓶颈还不在这里。</p><p><strong>改划分粒度</strong>（v3、v6）：让每个 block 认领更多数据、让每个线程处理更多元素。v3 一步就砍掉一半时间，是全部九版里收益最大的一次改动。</p><p><strong>改归约方式</strong>（v4、v5、v7）：减少栅栏、把 shared memory 中转换成 warp shuffle、用编译期常量剪掉分支。收益稳定但越来越小。</p></div>
+              <div class="callout"><span class="callout-title">三次改动</span><p><strong>改访存模式</strong>（v1、v2）：修分支发散、消 bank conflict。在本机这张卡上收益接近零，因为瓶颈还不在这里。</p><p><strong>改划分粒度</strong>（v3、v6）：让每个 block 认领更多数据、让每个线程处理更多元素。v3 一步就砍掉一半时间，是全部九版里收益最大的一次改动。</p><p><strong>改归约方式</strong>（v4、v5、v7）：减少栅栏、把 shared memory 中转换成 warp shuffle、用编译期常量剪掉分支。收益稳定但越来越小。</p></div>
               <p>v8 站在所有这些之上，又补了两件事：用 16 字节的 pack 把访存宽度拉满，用 <code>GetNumBlocks</code> 把 block 数从硬编码的 131072 降到按硬件规格算出来的 288。</p>
               <p>最有价值的一条经验或许是：<strong>要先把瓶颈定位对，再动手</strong>。v1 和 v2 的优化本身没有错——消发散、消 bank conflict 都是标准手法——但它们优化的是一个还没成为瓶颈的地方，所以一个变慢、一个白干。如果只按“标准优化清单”一条条往下做，很容易停在 43% 的带宽占用率上，还以为已经优化完了。</p>
               <p>下一篇：<a class="inline-link" href="elementwise.html">逐点运算</a>——同样是带宽受限，但这次要处理的是 half 类型的 2 字节访存，看 OneFlow 的模板怎么用编译期计算把访存指令再压一轮。</p>
@@ -615,7 +607,6 @@ int main(){
           </article>
         </div>
       </main>
-      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>01 / READING</span></div>
     </div>
   </body>
 </html>

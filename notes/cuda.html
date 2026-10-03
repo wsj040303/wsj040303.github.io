@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="WSJ 的 CUDA 入门编程笔记与章节目录。">
-    <meta name="theme-color" content="#101113">
+    <meta name="theme-color" content="#0b2015">
     <title>CUDA 入门编程 · WSJ</title>
     <link rel="stylesheet" href="../assets/site.css">
     <script src="../assets/site.js" defer></script>
@@ -26,9 +26,7 @@
       <main class="reader-main" id="main">
         <nav class="breadcrumb" aria-label="面包屑导航"><a href="../">首页</a><span>/</span><a href="../ai-infra/">AI Infra</a><span>/</span>CUDA 入门编程</nav>
         <div class="reader-heading">
-          <p class="eyebrow">AI INFRA / 01</p>
           <h1>CUDA 入门编程</h1>
-          <p>在章节目录中选择内容阅读。当前先建立目录结构，后续逐章补充笔记。</p>
         </div>
         <div class="reader-grid">
           <aside class="chapter-sidebar">
@@ -36,36 +34,31 @@
               <summary>章节目录</summary>
               <nav aria-label="CUDA 章节目录">
                 <ol class="chapter-list">
-                  <li><a href="#overview"><small>00</small> 专题概览</a></li>
-                  <li><a href="#execution"><small>01</small> 执行模型</a></li>
-                  <li><a href="#memory"><small>02</small> 内存层次</a></li>
-                  <li><a href="#first-kernel"><small>03</small> 第一个 Kernel</a></li>
-                  <li><a href="#performance"><small>04</small> 性能分析</a></li>
+                  <li><a href="#overview">专题概览</a></li>
+                  <li><a href="#execution">执行模型</a></li>
+                  <li><a href="#memory">内存层次</a></li>
+                  <li><a href="#first-kernel">第一个 Kernel</a></li>
+                  <li><a href="#performance">性能分析</a></li>
                 </ol>
               </nav>
             </details>
           </aside>
           <article class="reader-content">
-            <span class="article-state">专题提纲 · 正文持续整理中</span>
             <h2 id="overview">从这里开始</h2>
             <p>这个专题计划从 CUDA 的执行模型出发，逐步走到基础 Kernel 的编写与性能分析。下面各节目前是内容提要。</p>
             <section id="execution">
-              <p class="section-label">CHAPTER 01</p>
               <h3>执行模型</h3>
               <p>梳理 Host、Device、Kernel，以及 Grid、Block、Thread 的组织关系。</p>
             </section>
             <section id="memory">
-              <p class="section-label">CHAPTER 02</p>
               <h3>内存层次</h3>
               <p>整理全局内存、共享内存、寄存器等常见存储位置与数据移动方式。</p>
             </section>
             <section id="first-kernel">
-              <p class="section-label">CHAPTER 03</p>
               <h3>第一个 Kernel</h3>
               <p>以简单运算为例，记录编写、调用和验证 CUDA Kernel 的基本流程。</p>
             </section>
             <section id="performance">
-              <p class="section-label">CHAPTER 04</p>
               <h3>性能分析</h3>
               <p>逐步补充基准测试、访存与并行度等性能分析基础。</p>
             </section>
@@ -73,7 +66,6 @@
           </article>
         </div>
       </main>
-      <div class="frame-bottom"><span>AI INFRA / CUDA</span><span>03 / READING</span></div>
     </div>
   </body>
 </html>

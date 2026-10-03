@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="CUDA half atomicAdd 优化精读：pack2 与 fastAtomicAdd 两条凑宽度路径的代码拆解，附 RTX 5070 实测与 A100 数据对照。">
-    <meta name="theme-color" content="#101113">
+    <meta name="theme-color" content="#0b2015">
     <title>半精度原子加 · 把 2 字节凑成 4 字节 · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css">
     <script src="../../assets/site.js" defer></script>
@@ -26,9 +26,7 @@
       <main class="reader-main" id="main">
         <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>半精度原子加</nav>
         <div class="reader-heading">
-          <p class="eyebrow">AI INFRA / OPERATORS / 05</p>
           <h1>半精度原子加</h1>
-          <p>3350 万个线程往同一个地址做原子加。half 的原子操作只有 2 字节宽，占不满通路——三个版本用两种思路把它凑成 4 字节，本机实测 1.22 倍，而 A100 上是 3.08 倍。</p>
         </div>
         <div class="reader-grid">
           <aside class="chapter-sidebar">
@@ -36,26 +34,24 @@
               <summary>章节目录</summary>
               <nav aria-label="本文章节目录">
                 <ol class="chapter-list">
-                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
-                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
-                  <li><a href="#full"><small>02</small> 完整代码</a></li>
-                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
-                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                  <li><a href="#what">算子在做什么</a></li>
+                  <li><a href="#walk">代码逐段解析</a></li>
+                  <li><a href="#full">完整代码</a></li>
+                  <li><a href="#perf">实测性能对比</a></li>
+                  <li><a href="#summary">小结</a></li>
                 </ol>
               </nav>
             </details>
           </aside>
           <article class="reader-content">
-            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
             <section id="what">
-              <p class="section-label">CHAPTER 01</p>
               <h3>算子在做什么，先看一个算例</h3>
               <p>这一篇不是一个神经网络算子，而是一个<strong>底层原语</strong>：<code>atomicAdd</code>——多个线程往同一个地址做加法时，保证结果不丢的原子操作。</p>
               <p>它出现在所有“多对一”的累加场合：reduce 的收尾、稀疏 embedding 的梯度累加、直方图统计、bias 聚合。这篇文章要问的是一个很具体的问题：<strong>当累加的量是 half（2 字节）时，为什么 <code>atomicAdd</code> 会变得很慢，以及怎么让它快起来。</strong></p>
-<h4>先看 atomicAdd 为什么不能省</h4>
+              <h4>先看 atomicAdd 为什么不能省</h4>
               <p>普通的 <code>c[i] = c[i] + v</code> 是“读—改—写”三步。如果两个线程同时做这件事，它们可能都读到同一个旧值、各自加完再写回，后写的那个会盖掉先写的——一次加法凭空消失。<code>atomicAdd</code> 把这三步做成一个不可分割的整体，由硬件在 L2 上完成：同一个地址的操作会排队串行，但每个操作一定生效。</p>
               <p>代价也随之而来：<strong>同一地址的原子操作吞吐，取决于每次搬运的字节数</strong>。硬件通路按 32 位粒度组织，一次搬 2 字节就是只填了四分之一。这篇文章的三个版本，做的就是同一件事的三种做法：<strong>把每次原子操作的宽度凑到 4 字节。</strong></p>
-<h4>测例：一个刻意造出来的最坏情况</h4>
+              <h4>测例：一个刻意造出来的最坏情况</h4>
               <p>测例是 half 向量内积 <code>c = Σ a[i]*b[i]</code>，但重点不在内积本身。数据规模 <code>N = 32×1024×1024 = 33,554,432</code>，启动配置是 131072 个 block × 256 线程——<strong>线程总数恰好等于 N</strong>。</p>
               <div class="formula">阶段①  每个线程读 a[gid]、b[gid]，乘起来累进自己的寄存器 temp
         （每线程只有 1 个元素，所以这一阶段几乎不花时间）
@@ -66,7 +62,7 @@
 这不是一个真实负载会出现的形态——真实的内积会先在 block 内归约。
 它是&lt;strong&gt;故意构造的最坏竞争场景&lt;/strong&gt;，
 目的就是把“33.5M 条同地址原子操作”这个成本单独放到显微镜下看。</div>
-<h4>一个必须知道的坑：结果是 32，不是 335544.32</h4>
+              <h4>一个必须知道的坑：结果是 32，不是 335544.32</h4>
               <p>这个测例的数学真值是 <code>33,554,432 × 0.1 × 0.1 = 335,544.32</code>。但三个版本打印出来的是 <strong>32、64、32</strong>。这不是 bug，是 half 的精度问题，而且它和原子加的宽度<strong>毫无关系</strong>——三个版本都有这个问题。</p>
               <div class="formula">输出缓冲 c 是 half 类型，累加过程是这样发生的：
 
@@ -86,10 +82,9 @@ v1 冻在 64 而不是 32：它每次原子加贡献的是两个乘积之和 = 0
               <div class="callout"><span class="callout-title">这个坑本身就是结论的一部分</span><p>一个用 half 累加的内积，无论原子加优化得多快，算出来的都是错的值。所以下面性能一节的数字，<strong>衡量的是原子操作的吞吐，不是这个内积算得对不对</strong>。三个版本的对拍方式也因此只能是“对拍打印值是否与预期一致”，仓库里本来就没有正确性校验代码。</p></div>
             </section>
             <section id="walk">
-              <p class="section-label">CHAPTER 02</p>
               <h3>代码逐段解析</h3>
               <p>三个版本共享同一个 kernel 骨架——网格步长循环 + 每个线程最后发一条原子指令——差别只在<strong>那条原子指令怎么写</strong>。</p>
-<h4>① v0：基线，2 字节的 half 原子加</h4>
+              <h4>① v0：基线，2 字节的 half 原子加</h4>
               <figure class="code-block">
                 <figcaption><span>atomic_add_half.cpp : 15-29 · kernel</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>
@@ -117,7 +112,7 @@ atomicAdd(__half*)    2 字节    整个函数被 #if __CUDA_ARCH__ &gt;= 700 �
                                  即单 half 的原子加需要 sm_70+</div>
               <p>本机是 sm_120，两条路径都是硬件原生实现，不经过 CAS 模拟。<code>atom.add.noftz.f16</code> 里的 <code>noftz</code> 是“不清除非规格化数”——对 half 的加法语义有细微影响，但不是本文关心的重点。</p>
               <div class="callout"><span class="callout-title">half2 的原子性只保证“分别”原子</span><p>CUDA 文档里有明确说明：对 <code>__half2</code> 的原子操作，原子性是对 <strong>两个 half 分量分别</strong>成立的，<strong>不保证整个 32 位作为一个整体原子</strong>。这一点在下一节的 v2 里会变得很关键——因为 v2 正是靠“给邻居 lane 加 0”来凑宽度的，它依赖于两个分量互不干扰。</p></div>
-<h4>② v1：改数据视图，把两个 half 打包</h4>
+              <h4>② v1：改数据视图，把两个 half 打包</h4>
               <figure class="code-block">
                 <figcaption><span>atomic_add_half_pack2.cpp : 26-48 · Pack + AtomicAdd</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>//   数组排布就可能落在奇数地址上，后面 reinterpret_cast 成 half2* 就破坏对齐。
@@ -168,7 +163,7 @@ v1：线程 i 处理元素 {2i, 2i+1}，累加 2 个乘积，发 1 条 4 字节�
 原子指令&lt;strong&gt;条数没变&lt;/strong&gt;（线程数还是 33.5M），
 但每次搬运的字节数翻倍。</div>
               <p>两个硬约束：数组长度必须能被 2 整除，而且基地址必须 4 字节对齐。这两个要求意味着 v1 不是一个能直接丢进通用库的方案——它要求调用方保证数据布局，而真实场景里的缓冲区往往是从别处切出来的一段，未必满足。这正是 v2 要解决的问题。</p>
-<h4>③ v2：不动数据，只在对齐上做文章</h4>
+              <h4>③ v2：不动数据，只在对齐上做文章</h4>
               <figure class="code-block">
                 <figcaption><span>fast_atomic_add_half.cu : 15-41 · FastSpecializedAtomicAdd</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>template&lt;typename T, typename std::enable_if&lt;std::is_same&lt;half, T&gt;::value&gt;::type* = nullptr&gt;
@@ -243,7 +238,6 @@ __global__ void dot(half* a, half* b, half* c, int n){
               <div class="callout"><span class="callout-title">这不是 CAS 循环</span><p>“fastAtomicAdd”这个名字容易让人以为是手写的比较交换循环。在 sm_70 及以上、CUDA 10 以上的环境下（本机 sm_120 / CUDA 13.4 就在这个范围内），三个分支最终都直接调用硬件 <code>atomicAdd</code>，<strong>没有任何手写的 CAS</strong>。</p><p>代码顶部那行 <code>#if CUDA_VERSION &lt; 10000 || __CUDA_ARCH__ &lt; 700</code> 才会整段退化到 2 字节分支；而常说的 atomicCAS 循环模拟只存在于 sm_60 以下的 <code>cuda_fp16.hpp</code> 实现里，本机不经过。</p><p>这份实现是移植自 PyTorch 的 <code>aten/src/ATen/native/cuda/KernelUtils.cuh</code>。</p></div>
             </section>
             <section id="full">
-              <p class="section-label">CHAPTER 03</p>
               <h3>完整代码</h3>
               <p>三个版本都很短，这里全部贴出。v0 和 v1 用 <code>.cpp</code> 版本，v2 用仓库的正式实现 <code>fast_atomic_add_half.cu</code>——原因是 <code>v2/fast_atomic_add_half.cpp</code> 那份工作副本本身是<strong>残缺的</strong>：它在 <code>FastSpecializedAtomicAdd</code> 的非 half 重载处截断，没有 <code>FastAdd</code>、没有 <code>dot</code> kernel、也没有 <code>main</code>，而且中间有个拼写错误 <code>atmonicAdd</code>，无法编译。</p>
               <figure class="code-block">
@@ -527,10 +521,9 @@ int main(){
               <div class="callout"><span class="callout-title">三份 main 都没有计时代码</span><p>v0 的文件头里写得很直白：<code>#include &lt;time.h&gt;</code> 其实没用到，“main 里没有计时代码，耗时靠 ncu 外部测”。本文表格里的毫秒数是另加 <code>cudaEvent</code> 测的。</p><p>另外三份 <code>main</code> 都只 <code>printf</code> 出结果值，<strong>不与任何参考值比对</strong>——因为它们自己也知道结果是 32 而不是真值。</p></div>
             </section>
             <section id="perf">
-              <p class="section-label">CHAPTER 04</p>
               <h3>实测性能对比分析</h3>
               <p>规模 <code>N = 33,554,432</code>，线程数 = N，每个线程发一条原子指令，全部指向同一个地址。跑 7 次、取后 5 次最小值。这个负载的耗时完全由原子通路决定，带宽指标没有意义，所以下面换算成<strong>“每一次原子操作花了多少纳秒”</strong>来比较。</p>
-<h4>本机实测（RTX 5070）</h4>
+              <h4>本机实测（RTX 5070）</h4>
               <div class="table-scroll">
                 <table>
                   <thead><tr><th>版本</th><th>做法</th><th>原子宽度</th><th class="num">耗时 (ms)</th><th class="num">每次原子 (ns)</th><th class="num">相对 v0</th><th class="num">打印值</th></tr></thead>
@@ -545,7 +538,7 @@ int main(){
               <p><strong>第一，v1 和 v2 的耗时几乎一模一样（39.457 vs 39.456 ms）。</strong>这符合预期：两者最终的原子指令完全相同（4 字节 <code>atom.add.noftz.f16x2</code>），指令条数也相同，只是“怎么凑齐这 4 字节”的路径不同——v1 靠改数据布局，v2 靠运行期判断。两条路径的<strong>结果</strong>一致，所以性能一致。</p>
               <p><strong>第二，宽度翻倍只换来 1.22 倍，远不是 2 倍。</strong>如果原子通路的成本纯粹由字节数决定，2 字节变 4 字节应该接近 2 倍。实际只有 1.22 倍，说明这条通路上还有相当一部分成本是<strong>与宽度无关的固定开销</strong>——同地址操作排队、L2 往返延迟、指令发射。</p>
               <p><strong>第三，v2 的打印值 32 和 v1 的 64 不同，但这不是性能差异。</strong>v1 每次原子加贡献的是两个乘积之和（0.02），v2 因为走分支 1，只有本槽真正加到了 0.01、右邻居加的是 0——所以 v2 的累加速率与 v0 相同，冻结点也就和 v0 一样落在 32。这个差异纯粹是第 ① 段那个 half 精度问题的表现。</p>
-<h4>和 A100 上的数据对照</h4>
+              <h4>和 A100 上的数据对照</h4>
               <p>仓库 README 里原作者在 A100-PCIE-40GB 上用 ncu 测的同一组实验：</p>
               <div class="table-scroll">
                 <table>
@@ -568,12 +561,11 @@ RTX 5070 (672 GB/s)  1.43 ns          1.18 ns          1.22×
               <div class="callout"><span class="callout-title">怎么读这张表</span><p>如果只看 A100 的表，很容易得出“把 half 原子加打包成 half2 能提速 3 倍”这个结论，然后在别的卡上照做、发现只有 1.22 倍而怀疑自己写错了。两张表放在一起才能看出：<strong>3.08× 和 1.22× 都不是代码的性质，是代码与硬件配对的结果。</strong></p></div>
             </section>
             <section id="summary">
-              <p class="section-label">CHAPTER 05</p>
               <h3>小结</h3>
               <p>这三个版本把“凑宽度”这个思路的两条不同路径摆在一起，很值得对照：</p>
-<div class="callout"><span class="callout-title">两种凑宽度的思路</span><p><strong>v1 改数据结构</strong>：把数组重新解释成 <code>Pack&lt;half,2&gt;*</code>，让相邻两个 half 天然待在同一个 4 字节槽里。代价是<em>对调用方提出要求</em>——长度必须偶数、地址必须 4 字节对齐。做法简单，但不通用。</p><p><strong>v2 该调用点</strong>：数据布局一点不动，只在实际发起原子操作时判断对齐，能凑成就借邻居的格子（给它加 0，不改变它的值），凑不成退回 2 字节。代价是<em>每次多几条判断指令</em>，换来的是任意长度、任意地址都能用——所以它能被抽成通用库函数（PyTorch 就是这么用的）。</p><p>两者的<strong>最终原子指令完全相同</strong>，实测耗时也几乎相同（39.457 vs 39.456 ms）。差别只在于“这份复杂度由谁来承担”。</p></div>
+              <div class="callout"><span class="callout-title">两种凑宽度的思路</span><p><strong>v1 改数据结构</strong>：把数组重新解释成 <code>Pack&lt;half,2&gt;*</code>，让相邻两个 half 天然待在同一个 4 字节槽里。代价是<em>对调用方提出要求</em>——长度必须偶数、地址必须 4 字节对齐。做法简单，但不通用。</p><p><strong>v2 该调用点</strong>：数据布局一点不动，只在实际发起原子操作时判断对齐，能凑成就借邻居的格子（给它加 0，不改变它的值），凑不成退回 2 字节。代价是<em>每次多几条判断指令</em>，换来的是任意长度、任意地址都能用——所以它能被抽成通用库函数（PyTorch 就是这么用的）。</p><p>两者的<strong>最终原子指令完全相同</strong>，实测耗时也几乎相同（39.457 vs 39.456 ms）。差别只在于“这份复杂度由谁来承担”。</p></div>
               <p>另外一个更基础的收获是关于<strong>基线</strong>的：同一份优化，在 A100 上值 3.08 倍，在本机值 1.22 倍。原因不是代码变差了，而是本机的 2 字节原子加本来就不那么差。这和前面 elementwise（A100 上 1.69× / 本机 1.06×）、reduce（A100 上 9.94× / 本机 2.20×）是同一个规律：</p>
-<div class="callout"><span class="callout-title">跨卡照搬优化手法的风险</span><p>看到一个 3 倍的优化案例，先问一句：<strong>它的基线为什么那么慢？</strong></p><p>如果基线慢是因为硬件本身的短板（A100 的窄原子通路、A100 上 2 字节访存喂不饱 1555 GB/s），那换一张没有这个短板的卡，收益就会大幅缩水——甚至像 reduce 的 v1 那样变成负收益。</p><p>反过来，真正可移植的是<strong>“先定位瓶颈，再决定要不要动手”</strong>这个方法本身。</p></div>
+              <div class="callout"><span class="callout-title">跨卡照搬优化手法的风险</span><p>看到一个 3 倍的优化案例，先问一句：<strong>它的基线为什么那么慢？</strong></p><p>如果基线慢是因为硬件本身的短板（A100 的窄原子通路、A100 上 2 字节访存喂不饱 1555 GB/s），那换一张没有这个短板的卡，收益就会大幅缩水——甚至像 reduce 的 v1 那样变成负收益。</p><p>反过来，真正可移植的是<strong>“先定位瓶颈，再决定要不要动手”</strong>这个方法本身。</p></div>
               <p>这一篇也是五篇里的最后一篇。五个算子走下来，带宽受限（reduce、elementwise、upsample、gemv）和原子竞争（本篇）这两类问题各占一半，而每一类的优化空间都高度依赖目标硬件——这大概是这组实测里最一致的一条结论。</p>
               <p><a class="inline-link" href="./">← 返回 CUDA 算子优化目录</a></p>
             </section>
@@ -581,7 +573,6 @@ RTX 5070 (672 GB/s)  1.43 ns          1.18 ns          1.22×
           </article>
         </div>
       </main>
-      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>05 / READING</span></div>
     </div>
   </body>
 </html>

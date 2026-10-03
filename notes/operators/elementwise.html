@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="CUDA elementwise 逐点运算精读：OneFlow 模板如何用编译期包宽、SFINAE 与对齐回退处理所有边界情况，附 RTX 5070 实测。">
-    <meta name="theme-color" content="#101113">
+    <meta name="theme-color" content="#0b2015">
     <title>Element-wise 逐点运算 · 打包访存与边界处理 · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css">
     <script src="../../assets/site.js" defer></script>
@@ -26,9 +26,7 @@
       <main class="reader-main" id="main">
         <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>Element-wise 逐点运算</nav>
         <div class="reader-heading">
-          <p class="eyebrow">AI INFRA / OPERATORS / 02</p>
           <h1>Element-wise 逐点运算</h1>
-          <p>r[i] = f(a[i], b[i])——最简单的算子，却要处理尾巴、对齐、类型宽度、运算差异四件麻烦事。看 OneFlow 模板怎么把它们全部挪到编译期，以及为什么在这张卡上它只快了 6%。</p>
         </div>
         <div class="reader-grid">
           <aside class="chapter-sidebar">
@@ -36,19 +34,17 @@
               <summary>章节目录</summary>
               <nav aria-label="本文章节目录">
                 <ol class="chapter-list">
-                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
-                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
-                  <li><a href="#full"><small>02</small> 完整代码</a></li>
-                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
-                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                  <li><a href="#what">算子在做什么</a></li>
+                  <li><a href="#walk">代码逐段解析</a></li>
+                  <li><a href="#full">完整代码</a></li>
+                  <li><a href="#perf">实测性能对比</a></li>
+                  <li><a href="#summary">小结</a></li>
                 </ol>
               </nav>
             </details>
           </aside>
           <article class="reader-content">
-            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
             <section id="what">
-              <p class="section-label">CHAPTER 01</p>
               <h3>算子在做什么，先看一个算例</h3>
               <p>逐点运算（elementwise）是最简单的一类算子：输出数组的第 i 个元素<strong>只由</strong>输入数组的第 i 个元素算出。元素个数不变、形状不变、下标不动，线程之间没有任何数据交换。</p>
               <div class="formula">r[i] = f(a[i], b[i], ...)        i ∈ [0, n)
@@ -56,7 +52,7 @@
 具体到本文的例子（逐点乘法，两输入一输出）：
 z[i] = x[i] * y[i]</div>
               <p>加法、乘法、ReLU、GELU、加法融合的 bias——只要满足“下标对下标”，都是同一个模板的实例。也正因为如此，它的性能完全由<strong>访存</strong>决定：算一个乘法只要 1 条指令，而读两个数写一个数要 3 次访存。这是典型的带宽受限算子。</p>
-<h4>一个可以手工核对的算例</h4>
+              <h4>一个可以手工核对的算例</h4>
               <p>取 n = 10、类型为 half（2 字节）：</p>
               <div class="formula">x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]      （half）
 y = [2, 2, 2, 2, 2, 2, 2, 2, 2,  2]      （half）
@@ -81,10 +77,9 @@ n_tail     = 10 - 8 = 2      尾巴元素个数
               <p>这个例子把整套模板的动机说完了：<strong>在不改变计算结果的前提下，把访存指令的条数压下来</strong>。而要做到这一点，模板必须同时处理好四件麻烦事——元素数除不尽（尾巴）、指针不对齐、元素类型不同（包宽不同）、运算不同（有的运算能成对算，有的不能）。下面逐段看它是怎么把这些都塞进编译期的。</p>
             </section>
             <section id="walk">
-              <p class="section-label">CHAPTER 02</p>
               <h3>代码逐段解析</h3>
               <p>代码分三层：<strong>类型层</strong>（定义“一个包”是什么）、<strong>调度层</strong>（决定一个包怎么算）、<strong>启动层</strong>（决定开多少 block、要不要退回标量）。下面按这三层走。</p>
-<h4>① 类型层：PackType / Pack —— 只在编译期算尺寸用</h4>
+              <h4>① 类型层：PackType / Pack —— 只在编译期算尺寸用</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 15-37</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【pack 的存储类型】aligned_storage 给出&quot;大小 = pack_size*sizeof(T)、对齐 = 同样大&quot;的裸内存块。
@@ -113,7 +108,7 @@ union Pack {
               </figure>
               <p><code>std::aligned_storage&lt;N, N&gt;::type</code> 给出“大小 = N 字节、对齐 = N 字节”的一块裸内存。它的用途是当一把尺子：<code>sizeof(Pack&lt;T, pack_size&gt;)</code> 就是“一个包占几字节”。第 31 行的 <code>static_assert</code> 是编译期自证——确认 <code>aligned_storage</code> 没有被额外填充，否则“一个包 = 16 字节”这个前提就不成立了。</p>
               <p><code>Pack</code> 里那个什么都不做的默认构造 <code>__device__ Pack() {}</code> 也有讲究：如果写成 <code>= default</code> 或者干脆不写，编译器可能生成清零代码；显式写一个空实现，就明确告诉它“别生成任何东西”。</p>
-<h4>② 类型层：Packed —— kernel 里真正用的那个包</h4>
+              <h4>② 类型层：Packed —— kernel 里真正用的那个包</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 40-55</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【Packed：kernel 里真正用的&quot;一包&quot;】alignas 是关键：没有它，Packed&lt;half,8&gt; 的 alignof 只有 2，
@@ -135,7 +130,7 @@ constexpr int kMaxPackSize = 8;          // 上限 8 个元素（half 正好 16 
               </figure>
               <p><code>alignas(sizeof(T) * pack_size)</code> 是这里最关键的一句。没有它，<code>Packed&lt;half, 8&gt;</code> 的对齐只有成员的最大对齐（half 是 2 字节），编译器无法证明这个对象落在 16 字节边界上，就<strong>不敢发出 128 位的访存指令</strong>——打包白做。有了它，编译器才敢把 <code>pack_r[i]</code> 编译成一条 <code>LDG.E.128</code>。</p>
               <p>匿名 <code>union</code> 里只有一个成员，作用只是让 <code>packed.elem[j]</code> 这种写法能直接用，同时保持整体是个 trivially-copyable 的聚合体（可以按值传参、进寄存器）。</p>
-<h4>③ 类型层：包宽是编译期算出来的</h4>
+              <h4>③ 类型层：包宽是编译期算出来的</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 54-68</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>constexpr int kMaxPackBytes = 128 / 8;   // 16 字节 = 一条向量访存指令搬的量（128 bit）
@@ -161,7 +156,7 @@ float  (4B) → min(4, 8) = 4 个/包
 double (8B) → min(2, 8) = 2 个/包</div>
               <p><code>kMaxPackBytes = 128/8</code> 就是“一次访存最多搬 16 字节”，<code>kMaxPackSize = 8</code> 是为了别让包太宽。第二个变参版本 <code>PackSize&lt;T, U, Args...&gt;()</code> 递归取<strong>输出和所有输入里最小的那个包宽</strong>——只要有一个操作数是 double，整体就降到 2 个/包，保证类型对齐不出问题。</p>
               <div class="callout"><span class="callout-title">这里用 constexpr 而不是模板元编程</span><p>注意 <code>Min</code> 是自己写的 <code>constexpr</code> 版本，而不是 <code>std::min</code>——因为 <code>std::min</code> 在 C++11 的 CUDA 里不是 <code>constexpr</code> 的，没法用在模板实参里。这类“为了能进编译期”而手写的小函数在这个文件里到处出现。</p></div>
-<h4>④ 调度层：HasApply2 —— 问一句“这个 functor 能不能成对算”</h4>
+              <h4>④ 调度层：HasApply2 —— 问一句“这个 functor 能不能成对算”</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 71-89</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【编译期问一句：&quot;你这个 functor 有没有 Apply2 成员？&quot;】
@@ -186,7 +181,7 @@ class HasApply2 {
               </figure>
               <p>这是一个经典的 SFINAE 探测。核心是 <code>decltype(&amp;C::Apply2)</code>：只有当 <code>C</code> 真的有 <code>Apply2</code> 成员时，第一个 <code>test</code> 重载的声明才合法；否则模板替换失败（SFINAE），编译器退到第二个 <code>test(...)</code>。两个重载的返回值分别是 1 字节的 <code>one</code> 和 2 字节的 <code>two</code>，<code>sizeof</code> 一比就知道走了哪个分支。</p>
               <p>为什么要问这一句：half 的乘法有一条 <code>__hmul2</code> 指令能一次算 2 个 half，float 没有对应的双元素乘。有 <code>Apply2</code> 的 functor 走快路径，没有的走逐元素路径——而这个选择<strong>在编译期就定死了，没有运行期分支</strong>。</p>
-<h4>⑤ 调度层：ApplyPack 的两个重载</h4>
+              <h4>⑤ 调度层：ApplyPack 的两个重载</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 93-116</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【ApplyPack 版本 A：functor 有 Apply2 且包宽是偶数】一次给 2 个元素的地址，让 functor 成对算。
@@ -217,7 +212,7 @@ ApplyPack(const FunctorT&amp; functor, const Packed&lt;IN, pack_size&gt;... in) 
               <p>两个函数体都很短，选哪个由 <code>std::enable_if</code> 决定，而两个条件是互补的（<code>HasApply2 == true &amp;&amp; pack_size % 2 == 0</code> 与它的取反），不会同时可选、也不会都不可选。</p>
               <p>版本 A 每次推进 2 个元素，把 <code>ret.elem + j</code> 这个<strong>元素数组内的地址</strong>交给 functor 的 <code>Apply2</code>，由 functor 自己决定怎么成对算（half 版就是把它 reinterpret_cast 成 <code>half2*</code> 再调 <code>__hmul2</code>）。版本 B 老老实实一个元素调一次 <code>operator()</code>。</p>
               <p>形参 <code>const Packed&lt;IN, pack_size&gt;... in</code> 是变参模板展开：每个输入一个包，按值传（16 字节，直接进寄存器）。调用点传的是 <code>(pack_in[i])...</code>，即“第 i 包的所有输入”。所以三元运算和二元运算共用同一份 <code>ApplyPack</code>，这也是这套模板能叫“通用框架”的原因。</p>
-<h4>⑥ 调度层：ApplyGeneric —— 网格步长走包 + 标量补尾巴</h4>
+              <h4>⑥ 调度层：ApplyGeneric —— 网格步长走包 + 标量补尾巴</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 124-135</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>template&lt;int pack_size, typename FactoryT, typename R, typename... IN&gt;
@@ -237,7 +232,7 @@ __global__ void __launch_bounds__(kBlockSize)     // 告诉 ptxas 每 block 最�
               <p>第二，网格步长循环遍历 pack；<code>global_tid</code> 用的是常量 <code>kBlockSize</code> 而不是 <code>blockDim.x</code>，这是和 <code>__launch_bounds__(kBlockSize)</code> 配套的写法。</p>
               <p>第三，尾巴处理。<code>if (global_tid &lt; n_tail)</code>：前 <code>n_tail</code> 个线程每人补算 1 个元素，走标量路径。用 10 个元素、包宽 8 来验证一下：<code>n_pack = 1</code>、<code>n_tail = 2</code>，0 号线程进包循环算第 0 包，然后 0 号和 1 号线程各补一个尾巴元素——正好覆盖下标 0~9，不多不少。</p>
               <div class="callout"><span class="callout-title">指针的两套视图是这段代码最绕的地方</span><p>同一个输出缓冲区，<code>pack_r</code> 当 <code>Packed&lt;R, pack_size&gt;*</code> 用（下标是包号），<code>tail_r</code> 当 <code>R*</code> 用（下标是元素号）。切换点是 host 侧的 <code>r + tail_offset</code>：指针往后挪 <code>tail_offset</code> <strong>个元素</strong>，正好落在尾巴的起点，而包视图那边只需要 <code>n_pack</code> 个包。两套指针指向同一块内存，只是单位不同。</p></div>
-<h4>⑦ 调度层：SimpleFactory —— 让 functor 在 device 侧构造</h4>
+              <h4>⑦ 调度层：SimpleFactory —— 让 functor 在 device 侧构造</h4>
               <figure class="code-block">
                 <figcaption><span>elementwise.cpp : 138-149</span><span class="code-lang">CUDA C++</span></figcaption>
                 <pre><code>// 【functor 工厂】把 functor 装进一个可拷贝的小对象，kernel 里 factory() 再取出来。
@@ -254,7 +249,7 @@ struct SimpleFactory {
 };</code></pre>
               </figure>
               <p>如果把 functor 直接当 kernel 形参传，它的类型就必须在 host 和 device 两侧都能构造，这对带复杂成员的 functor 是个限制。工厂模式把“构造”这个动作推迟到 device 侧（kernel 里那句 <code>auto functor = factory();</code>），host 侧只负责把 functor 装进一个可拷贝的小对象里带过去。<code>SimpleFactory&lt;T&gt;</code> 本身在 host 侧构造，取值的 <code>operator()</code> 是 <code>__device__</code> 的。</p>
-<h4>⑧ 启动层：block 数上限与对齐回退（在 elementwise.cu 里）</h4>
+              <h4>⑧ 启动层：block 数上限与对齐回退（在 elementwise.cu 里）</h4>
               <p>elementwise.cpp 到 <code>SimpleFactory</code> 就结束了——它是一个<strong>模板核心</strong>，配套的 host 侧启动器在 <code>elementwise.cu</code> 里。这部分决定了“开多少 block”和“对齐不了怎么办”，少了它这套模板并不完整：</p>
               <figure class="code-block">
                 <figcaption><span>elementwise.cu : 14-40 · GetNumBlocks</span><span class="code-lang">CUDA C++</span></figcaption>
@@ -360,7 +355,6 @@ kNumWaves = 32：允许开的 block 数是最小驻留量的 32 倍</div>
               <p><strong>block 数被压了上限</strong>：<code>kNumWaves = 32</code> 意味着 block 数最多是“刚好填满 GPU 所需数量”的 32 倍。本机实测打印 <code>num_blocks=9216</code>、总线程 2359296，而 <code>n_pack = 4194304</code>——线程数比包数还少，多出来的包由网格步长循环吸收（每个线程摊 1~2 个包）。这和 reduce 的 v8 是同一个思路：<em>别开那么多 block</em>。</p>
             </section>
             <section id="full">
-              <p class="section-label">CHAPTER 03</p>
               <h3>完整代码</h3>
               <p>下面是 <code>elementwise.cpp</code> 全文（149 行），一字未改。它包含了从 <code>PackType</code> 到 <code>SimpleFactory</code> 的全部模板核心，但没有 <code>main</code>、也没有第 ⑧ 段那些启动器函数——所以它本身不是一个可执行程序，单独编译只能得到一个目标文件。要跑起来需要配上 <code>elementwise.cu</code> 里的启动层，或者自己写一个 <code>main</code> 调用 <code>Binary(MultiplyFunctor&lt;half&gt;(), n, z, x, y)</code>。</p>
               <figure class="code-block is-long">
@@ -518,10 +512,9 @@ struct SimpleFactory {
               <div class="callout"><span class="callout-title">把它补成一个能跑的程序</span><p>本文的性能数据就是这么测的：以 <code>elementwise.cu</code> 为骨架（它同时含核心与启动层），把它的 <code>main</code> 换成一段计时程序，分别调用朴素 kernel <code>mul&lt;T&gt;</code> 和模板入口 <code>Binary(...)</code>，float 与 half 各测一遍。编译命令：</p><p><code>nvcc -arch=sm_120 -O3 -o elementwise_bench elementwise_bench.cu</code></p></div>
             </section>
             <section id="perf">
-              <p class="section-label">CHAPTER 04</p>
               <h3>实测性能对比分析</h3>
               <p>数据规模 <code>n = 2²⁵ = 33,554,432</code> 个元素（每个缓冲区：float 128 MiB / half 64 MiB），两个输入一个输出，所以总访存量 = 3 × n × sizeof(T)。每个 kernel 跑 13 次、丢掉前 3 次、取后 10 次最小值。朴素版用的是 <code>elementwise.cu</code> 里那个原始的 <code>mul&lt;T&gt;</code> kernel（1 线程 1 元素，无边界检查）。</p>
-<h4>本机实测（RTX 5070）</h4>
+              <h4>本机实测（RTX 5070）</h4>
               <div class="table-scroll">
                 <table>
                   <thead><tr><th>数据类型</th><th>实现</th><th class="num">耗时 (µs)</th><th class="num">等效带宽 (GB/s)</th><th class="num">占峰值 672 GB/s</th><th class="num">相对朴素版</th></tr></thead>
@@ -537,7 +530,7 @@ struct SimpleFactory {
               <p><strong>float 上模板没占到便宜（676.5 vs 671.3 µs，反而慢了 0.8%）。</strong>原因不复杂：4 字节的 float 本来就是访存通路的自然宽度，一个线程读 4 字节、相邻线程读相邻地址，一个 warp 的 32 个 lane 合起来正好是连续的 128 字节——合并度已经是满的。打包成 <code>float4</code> 只是把指令数从 3 条减到 3 条（读两条、写一条变成读两条、写一条，数量没变），却额外引入了包内 4 个分量的拆分与合并。指令数没省下来，自然看不出收益。</p>
               <p><strong>half 上模板快了 6%。</strong>这里才是它的用武之地：half 是 2 字节，朴素写法一个线程搬 2 字节，一个 warp 的 32 个 lane 合起来只有 64 字节——不到一条完整 128 字节事务的一半，一次访存要浪费掉一半带宽。打包成 8 个 half（16 字节）之后，一个 warp 一次覆盖 512 字节连续内存，正好是 4 条完整事务。再加上 <code>__hmul2</code> 一次算两个，计算侧的指令数也减半。</p>
               <p>但要注意：6% 远不是“把浪费的一半带宽全捡回来”。原因是朴素 half 版虽然每条指令只搬 2 字节，但 GPU 靠<strong>大量线程并发</strong>把这个宽度不足掩盖掉了大部分——<code>L1</code> 会把同一 warp 内的请求合并，实际发往 DRAM 的仍然是完整事务。所以“2 字节访问浪费一半带宽”在孤立看指令时成立，在整机吞吐上只体现为几个百分点。</p>
-<h4>和 A100 上的数据对照</h4>
+              <h4>和 A100 上的数据对照</h4>
               <p>仓库 README 里原作者在 A100-PCIE-40GB（峰值 1555 GB/s）上测的一组数字，数据规模同样是 n = 2²⁵：</p>
               <div class="table-scroll">
                 <table>
@@ -555,10 +548,9 @@ struct SimpleFactory {
               <div class="callout"><span class="callout-title">一句话总结这两张表</span><p>同一份模板代码，在 A100 上能把 half 提速 1.69×，在本机只有 1.06×，而 float 上两台机器都≈1.00×。<strong>优化的收益不取决于代码写了什么，取决于它补上的那个短板在目标硬件上到底有多短。</strong></p></div>
             </section>
             <section id="summary">
-              <p class="section-label">CHAPTER 05</p>
               <h3>小结</h3>
               <p>这套模板真正的价值，与其说是“快”，不如说是<strong>把一堆本该手工处理的边界情况塞进了编译期</strong>：</p>
-<div class="callout"><span class="callout-title">它替你处理掉的四件事</span><p><strong>包宽随类型自动定</strong>：<code>PackSize&lt;T&gt;()</code> 在编译期算出 half→8、float→4、double→2，并且取所有操作数里最窄的那个，不会出现“一个 double 混进来导致对齐崩掉”。</p><p><strong>元素数除不尽</strong>：自动切出 <code>n_pack</code> 个完整的包 + <code>n_tail</code> 个尾巴，尾巴走标量路径。</p><p><strong>指针不对齐</strong>：运行期检查，对齐走宽路径，不对齐整体退化成包宽 1，结果依然正确。</p><p><strong>运算不同</strong>：用 SFINAE 探测 functor 有没有 <code>Apply2</code>，有就用成对指令（<code>__hmul2</code>），没有就逐元素算——编译期二选一，没有运行期分支。</p></div>
+              <div class="callout"><span class="callout-title">它替你处理掉的四件事</span><p><strong>包宽随类型自动定</strong>：<code>PackSize&lt;T&gt;()</code> 在编译期算出 half→8、float→4、double→2，并且取所有操作数里最窄的那个，不会出现“一个 double 混进来导致对齐崩掉”。</p><p><strong>元素数除不尽</strong>：自动切出 <code>n_pack</code> 个完整的包 + <code>n_tail</code> 个尾巴，尾巴走标量路径。</p><p><strong>指针不对齐</strong>：运行期检查，对齐走宽路径，不对齐整体退化成包宽 1，结果依然正确。</p><p><strong>运算不同</strong>：用 SFINAE 探测 functor 有没有 <code>Apply2</code>，有就用成对指令（<code>__hmul2</code>），没有就逐元素算——编译期二选一，没有运行期分支。</p></div>
               <p>而它的性能故事则是一堂更实际的课：<strong>打包访存不是万能药</strong>。当元素本身就是 4 字节、且相邻线程已经连续访问时，一个 warp 天然就凑满了 128 字节的事务，再打包不会有任何收益；只有当元素类型窄于通路宽度（half 的 2 字节、或者 int8 之类的 1 字节）时，打包才真正开始起作用。</p>
               <p>下一篇：<a class="inline-link" href="upsample-nearest2d.html">最近邻 2 倍上采样</a>——同样是打包访存，但这次输出比输入大 4 倍，写多读少，而且反向传播里还能顺手甩掉 atomicAdd。</p>
             </section>
@@ -566,7 +558,6 @@ struct SimpleFactory {
           </article>
         </div>
       </main>
-      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>02 / READING</span></div>
     </div>
   </body>
 </html>

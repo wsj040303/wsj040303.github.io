@@ -156,6 +156,90 @@ img { display: block; max-width: 100%; }
 .reader-actions a { display: inline-block; padding-bottom: 7px; border-bottom: 1px solid #777a7e; color: #d5d7d9; font-size: 13px; }
 .reader-actions a:hover { color: white; border-color: white; }
 
+/* ------------------------- 文章正文：正文元素 ------------------------- */
+.reader-content section h4 { margin: 24px 0 10px; font-size: 16px; letter-spacing: -.01em; color: #e6e7e8; }
+.reader-content section ul, .reader-content section ol { margin: 12px 0; padding-left: 22px; color: #b4b7bb; font-size: 14px; line-height: 1.9; }
+.reader-content section li { margin-bottom: 5px; }
+.reader-content section li::marker { color: #74787e; }
+.reader-content code {
+  padding: 1px 5px;
+  border: 1px solid #3a3d42;
+  background: #1b1d21;
+  color: #e2e3e4;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: .88em;
+  word-break: break-word;
+}
+.reader-content section p + p { margin-top: 12px; }
+.reader-content a.inline-link { color: #dcdddf; border-bottom: 1px solid #6d7074; }
+.reader-content a.inline-link:hover { color: white; border-color: white; }
+
+/* 代码块：文件名条 + 可横向滚动的正文 */
+.code-block { margin: 18px 0; border: 1px solid #44474b; background: #14161a; }
+.code-block > figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #34363a;
+  background: #191b1f;
+  color: #9a9da2;
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+.code-block > figcaption .code-lang { color: #74787e; letter-spacing: .12em; }
+.code-block pre {
+  margin: 0;
+  padding: 15px 16px;
+  overflow-x: auto;
+  background: #14161a;
+}
+.code-block code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #cfd2d5;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.72;
+  white-space: pre;
+  word-break: normal;
+}
+.code-block.is-long pre { max-height: 30rem; overflow-y: auto; }
+.code-note { margin: -8px 0 18px; color: #85888d; font-size: 12px; line-height: 1.7; }
+
+/* 性能与数据表格 */
+.reader-content table { width: 100%; margin: 18px 0; border-collapse: collapse; font-size: 13px; }
+.reader-content thead th {
+  padding: 10px 12px;
+  border-bottom: 1px solid #55585c;
+  color: #d6d8da;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+.reader-content tbody td { padding: 9px 12px; border-bottom: 1px solid #2c2e33; color: #b4b7bb; }
+.reader-content tbody tr:hover td { background: #191b1f; }
+.reader-content tbody tr.is-best td { color: #f0f0ef; }
+.reader-content tbody tr.is-best td:first-child { box-shadow: inset 2px 0 0 #cecfd1; }
+.reader-content td.num, .reader-content th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-scroll { overflow-x: auto; margin: 18px 0; }
+.table-scroll table { margin: 0; min-width: 30rem; }
+
+/* 提示框 */
+.callout { margin: 18px 0; padding: 14px 16px; border: 1px solid #3f4247; border-left: 3px solid #9a9da2; background: #17191d; }
+.callout p { color: #b7babd; font-size: 13.5px; line-height: 1.85; margin: 0; }
+.callout p + p { margin-top: 9px; }
+.callout .callout-title { display: block; margin-bottom: 7px; color: #e0e1e2; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+
+/* 公式 / 算例方块 */
+.formula { margin: 18px 0; padding: 15px 17px; border: 1px dashed #4a4d52; background: #15171b; color: #dcdddf; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.9; overflow-x: auto; white-space: pre; }
+
+/* 算子目录卡片补充 */
+.topic-list.is-operator { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.topic-card .topic-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.topic-card .topic-meta span { padding: 3px 7px; border: 1px solid #45484d; color: #92959a; font-size: 10px; letter-spacing: .06em; }
+
 /* Placeholder pages */
 .placeholder-main { display: flex; align-items: center; flex: 1; padding: 80px clamp(50px, 10vw, 145px); }
 .placeholder-main > div { max-width: 650px; }
@@ -200,7 +284,14 @@ img { display: block; max-width: 100%; }
   .reader-heading { margin-block: 30px; }
   .reader-grid { display: block; }
   .chapter-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
-  .reader-content { padding: 36px 25px 65px; }
+  .reader-content { padding: 36px 18px 65px; }
+  .code-block pre { padding: 12px; }
+  .code-block code { font-size: 11.5px; }
+  .code-block.is-long pre { max-height: 24rem; }
+  .reader-content table { font-size: 12px; }
+  .reader-content thead th, .reader-content tbody td { padding: 8px 9px; }
+  .formula { font-size: 11.5px; padding: 12px; }
+  .topic-list.is-operator { grid-template-columns: 1fr; }
   .placeholder-main { padding: 80px 30px; }
 }
 @media (prefers-reduced-motion: reduce) {

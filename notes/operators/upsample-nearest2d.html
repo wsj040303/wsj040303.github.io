@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUDA 最近邻 2 倍上采样正反向 kernel 精读：Pack2X 打包访存与按输入划分线程，附 RTX 5070 实测 7.73× 对比。">
+    <meta name="theme-color" content="#101113">
+    <title>UpsampleNearest2D 最近邻 2 倍上采样 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a><a href="../../ai-infra/">AI Infra</a><a href="../../projects/">GitHub 项目</a><a href="../../resources/">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>最近邻 2 倍上采样</nav>
+        <div class="reader-heading">
+          <p class="eyebrow">AI INFRA / OPERATORS / 03</p>
+          <h1>最近邻 2 倍上采样</h1>
+          <p>每个输入像素复制成 2×2 输出块，元素数 ×4。用 Pack2X 把写宽度翻倍，再靠“按输入划分线程”把反向的 atomicAdd 彻底省掉——本机实测 half 反向快 7.73 倍。</p>
+        </div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>章节目录</summary>
+              <nav aria-label="本文章节目录">
+                <ol class="chapter-list">
+                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
+                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
+                  <li><a href="#full"><small>02</small> 完整代码</a></li>
+                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
+                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                </ol>
+              </nav>
+            </details>
+          </aside>
+          <article class="reader-content">
+            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
+            <section id="what">
+              <p class="section-label">CHAPTER 01</p>
+              <h3>算子在做什么，先看一个算例</h3>
+              <p>最近邻 2 倍上采样（UpsampleNearest2D 2X）把一张特征图放大一倍：输出的每个像素直接取输入里对应的那个像素，<strong>不插值、不平均、不做任何加权</strong>——最近邻就是“复制”的意思。</p>
+              <p>它在网络里通常出现在需要“把特征图放大回原尺寸”的位置：FPN 自顶向下路径要把小特征图放大后与浅层特征相加、分割网络的解码端要逐步恢复到输入分辨率、VAE 解码器也要把隐变量逐级放大。这些场景里它往往不是性能瓶颈，但因为输入输出数据量差 4 倍，实际上是一个不小的带宽消耗点。</p>
+              <div class="formula">形状（NCHW 布局）：
+  in  : N × C × H   × W
+  out : N × C × 2H  × 2W        元素数是输入的 4 倍
+
+数值映射（每个输入像素原样铺满输出的一个 2×2 块）：
+  out[n, c, 2h,   2w  ] = in[n, c, h, w]
+  out[n, c, 2h,   2w+1] = in[n, c, h, w]
+  out[n, c, 2h+1, 2w  ] = in[n, c, h, w]
+  out[n, c, 2h+1, 2w+1] = in[n, c, h, w]</div>
+<h4>一个可以手工核对的算例</h4>
+              <p>取一个 2×2 的输入（单通道）：</p>
+              <div class="formula">输入 in（2×2）：          输出 out（4×4）：
+   1  2                     1  1  2  2
+   3  4                     1  1  2  2
+                            3  3  4  4
+                            3  3  4  4
+
+核对：in(0,0)=1 → out 的 (0,0)(0,1)(1,0)(1,1) 四个位置
+      in(1,0)=3 → out 的 (2,0)(2,1)(3,0)(3,1) 四个位置</div>
+              <p>仓库里 demo 跑的是一个更容易肉眼检查的形状——2 个平面、每平面 2 行 3 列，填入 1~12：</p>
+              <div class="formula">in :  1 2 3  |  7  8  9
+      4 5 6  | 10 11 12
+
+out:  1 1 2 2 3 3  |  7  7  8  8  9  9
+      1 1 2 2 3 3  |  7  7  8  8  9  9
+      4 4 5 5 6 6  | 10 10 11 11 12 12
+      4 4 5 5 6 6  | 10 10 11 11 12 12
+
+核对：in 里第 5 个数（nc=0, h=1, w=1）的值是 5，
+      它出现在 out 的 (2,2)(2,3)(3,2)(3,3) 四个位置上。</div>
+<h4>反向：梯度怎么回去</h4>
+              <p>反向传播时，正向的“1 个输入复制成 4 个输出”对应到梯度上就是“<strong>4 个输出的梯度加起来还给 1 个输入</strong>”。这是链式法则的直接结果：正向一个输入值被用在了 4 个地方，所以这 4 个地方各自算出的梯度都要累加到它头上。</p>
+              <div class="formula">dx[n, c, h, w] = dy[n, c, 2h,   2w  ]
+                + dy[n, c, 2h,   2w+1]
+                + dy[n, c, 2h+1, 2w  ]
+                + dy[n, c, 2h+1, 2w+1]
+
+用 dy 全填 1 来验证：每个 dx 都应该等于 4。</div>
+              <p>这里有一个<strong>结构性的设计选择</strong>，也是本文性能对比里差距最大的地方：如果按“每个输出像素一个线程”来划分反向，那么上式的 4 个 dy 会分散在 4 个不同线程手里，它们要写同一个 dx，就必须用 <code>atomicAdd</code> 来避免写冲突。而 OneFlow 这份 kernel 换了个划分方式——<strong>按输入划分</strong>：一个输入像素对应的那个 2×2 输出块，永远由同一个线程负责。这样 4 个梯度天然落在同一个线程的寄存器里，普通加法就够了，一个原子操作都不需要。</p>
+              <div class="callout"><span class="callout-title">这个划分方式就是全部优化的一半</span><p>“按谁划分”在 GPU 上是个反复出现的基本决策。按输出划分看起来更自然（输出大、并行度看上去更高），但它把本该在同一个线程内完成的事情拆给了 4 个线程，代价是一条原子指令和随之而来的竞争。按输入划分并行度少 4 倍，但每个线程手里的活是自洽的——本文后面的实测会看到，这个选择在 half 上值 7.7 倍。</p></div>
+            </section>
+            <section id="walk">
+              <p class="section-label">CHAPTER 02</p>
+              <h3>代码逐段解析</h3>
+              <p>代码不长，核心只有两个 kernel。要理解它，先要跨过一道门槛：<strong>一维下标怎么还原成 (n, c, h, w)</strong>。</p>
+<h4>① 先把二维坐标问题压成一维</h4>
+              <p>NCHW 布局下内存是连续的一维数组。kernel 的形参里只有 <code>in_height</code>、<code>in_width</code> 和元素总数，<strong>没有 N、也没有 C</strong>——因为上采样不动 n 和 c，只改 h、w。所以 n 和 c 可以合并成一个概念：“第几个平面”。</p>
+              <div class="formula">in 的线性下标（输入是 H×W 的平面，共若干平面）：
+  index = ((n*C + c) * H + h) * W + w
+        = nc_idx * (H*W)  +  h*W + w
+          └─ 第几个平面 ─┘   └ 平面内偏移 ┘
+
+还原：
+  nc_idx = index / (H*W)          第几个平面
+  hw_off = index - nc_idx*(H*W)   平面内偏移
+  h      = hw_off / W             行号
+  w      = hw_off - h*W           列号</div>
+              <p>注意后两步用的是<strong>“算出商再反推余数”</strong>而不是 <code>%</code>：<code>hw_off - h*W</code> 和 <code>hw_off % W</code> 结果相同，但少了一次取模运算。这是整数除法代价高时的常规手法（这份代码里除法本身没省掉，见第 ⑤ 段的说明）。</p>
+<h4>② Pack2X：把水平相邻的两个元素绑在一起</h4>
+              <figure class="code-block">
+                <figcaption><span>upsample_nearest_2d.cpp : 21-25</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>template&lt;typename T&gt;
+struct alignas(2 * sizeof(T)) Pack2X {
+    T x;
+    T y;
+};</code></pre>
+              </figure>
+              <p>只有 4 行，但它是整个性能提升的来源。<code>alignas(2 * sizeof(T))</code> 让 <code>Pack2X&lt;float&gt;</code> 的对齐从 4 字节抬到 8 字节，编译器才敢把对这个结构体的读写编译成 64 位的访存指令。没有这句 <code>alignas</code>，编译器无法证明对象落在 8 字节边界上，只能退回两次 4 字节访问。</p>
+              <p>为什么是“水平相邻的两个”而不是别的组合——因为正向的映射里，<code>out[2w]</code> 和 <code>out[2w+1]</code> <strong>永远存的是同一个值</strong>。既然两个位置的值必然相同，那就一次写进去，省掉一条指令。</p>
+<h4>③ 网格步长宏</h4>
+              <figure class="code-block">
+                <figcaption><span>upsample_nearest_2d.cpp : 16-18</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>#define CUDA_1D_KERNEL_LOOP(i, n)                                                                 \
+  for (int32_t i = blockIdx.x * blockDim.x + threadIdx.x, step = blockDim.x * gridDim.x; i &lt; (n); \
+       i += step)  // 【循环体末尾的 i += step】就是&quot;跳到下一个归本线程的元素&quot;</code></pre>
+              </figure>
+              <p>一个写死的 for 循环：从本线程的全局编号出发，每次跳“整个网格的线程数”。好处是 kernel 不挑 grid 大小——但注意 <code>step</code> 声明成了 <code>int32_t</code>，元素总数超过 2³¹ 就会溢出。本例是 2²⁵，离上限还远。</p>
+<h4>④ 正向 kernel：1 条标量读 + 2 条宽写</h4>
+              <figure class="code-block">
+                <figcaption><span>upsample_nearest_2d.cpp : 28-48</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// 【正向】线程按**输入**下标划分：每线程读 1 个 in 元素，把它复制成输出上的一个 2x2 块。
+// 4 个输出位置 = 2 个 Pack2X（上下两行各一个），所以是 2 条宽存储。 
+// 【形参】in_elem_cnt：输入元素总数（= N）；in_height/in_width：输入的 H、W（输出是 2 倍）；
+//   in_dptr：输入显存地址（只读）；out_dptr：输出显存地址（4 倍元素数，写）。
+template&lt;typename T&gt;
+__global__ void UpsampleNearest2D2XForward(const int32_t in_elem_cnt, const T* in_dptr,
+                                           const int32_t in_height, const int32_t in_width,
+                                           T* out_dptr){
+  const int32_t in_hw_size = in_width * in_height;  // 一个 (n,c) 平面的输入元素数；输出平面是它的 2 倍（pack 数）
+  CUDA_1D_KERNEL_LOOP(index, in_elem_cnt) {        // index 是**输入**的线性下标：index = ((n*C + c)*H + h)*W + w
+    const T in_value = in_dptr[index];             // 1 条标量读（float 时 PTX 是 ld.global.b32）
+    const int32_t nc_idx = index / in_hw_size;     // 第几个 (n,c) 平面。除数是运行期形参 → 走倒数近似，见文件头&quot;整数除法的代价&quot;
+    const int32_t hw_off = index - nc_idx * in_hw_size;  // 平面内偏移；用商反推余数，省掉一次 `%`
+    const int32_t h = hw_off / in_width;           // 输入行号（第二次除法）
+    const int32_t w = hw_off - h * in_width;       // 输入列号（同样用商反推余数）
+    Pack2X&lt;T&gt; out_value{in_value, in_value};       // 造出一个&quot;两个相同值&quot;的 pack：{x,y} = {v,v}
+    Pack2X&lt;T&gt;* out_pack_dptr = reinterpret_cast&lt;Pack2X&lt;T&gt;*&gt;(out_dptr);  // 换成 pack 视图（输出的一行有 2*in_width 个元素 = in_width 个 pack，(n,c) 平面的 pack 数是 2*in_hw_size）；要求 out_dptr 8B(float)/4B(half) 对齐，见文件头&quot;main 的测例…&quot;第 3 条
+    out_pack_dptr[nc_idx * in_hw_size * 2 + h * 2 * in_width + w] = out_value;       // 写输出的第 2h 行：覆盖 (2h,2w) 和 (2h,2w+1)。一个 warp 内 lane 只改变 w，32 个地址连续（float 时 256B 完整事务）
+    out_pack_dptr[nc_idx * in_hw_size * 2 + (h * 2 + 1) * in_width + w] = out_value; // 写输出的第 2h+1 行：覆盖 (2h+1,2w) 和 (2h+1,2w+1)。与上一条相隔 2*in_width 个元素（in_width=1024 时 8KB），也是独立的完整事务
+  }
+}</code></pre>
+              </figure>
+              <p>线程按<strong>输入</strong>下标划分，所以每个线程只读 1 个输入元素，但要写出 4 个输出位置。这 4 个位置构成一个 2×2 块，正好是<strong>上下两行各一个 <code>Pack2X</code></strong>：</p>
+              <div class="formula">in_value = in_dptr[index]                        ← 1 条标量读
+
+out_value = {in_value, in_value}                ← 造一个“两个相同值”的包
+
+out_pack[nc_idx*in_hw_size*2 + h*2*in_width + w]           ← 写输出的第 2h   行
+out_pack[nc_idx*in_hw_size*2 + (h*2+1)*in_width + w]       ← 写输出的第 2h+1 行
+                                                              （各覆盖 2 个元素）</div>
+              <p>输出那两个下标值得拆开看。输出每个平面的 pack 数是 <code>2 * in_hw_size</code>（输出元素是 4 倍，但 pack 里装了 2 个，所以 pack 数是 2 倍）；行内偏移是 <code>h*2*in_width</code>——输出一行有 <code>2*in_width</code> 个元素，也就是 <code>in_width</code> 个 pack，所以“第 2h 行的行首”正好是 <code>2h * in_width</code> 个 pack。最后 <code>+w</code> 是关键：<strong>pack 的组号恰好等于输入列号 w</strong>，因为第 w 个 pack 覆盖的就是输出第 2w、2w+1 两列。</p>
+              <p>访存效果：一个 warp 的 32 个 lane 只在下标 <code>w</code> 上不同，32 个连续的 8 字节 pack = 256 字节完整事务。如果不用 pack，同样这 256 字节范围会被拆成 4 条各自只填一半字节的指令。</p>
+              <p>还有一处细节：<code>h*2*in_width</code> 和 <code>(h*2+1)*in_width</code> 这两个地址之间隔了 <code>in_width</code> 个 pack = 8 KB（in_width=1024 时），所以它们是两次独立的完整事务，不会互相抵消。</p>
+<h4>⑤ 整数除法的代价</h4>
+              <p>第 ① 段那两次除法，除数是<strong>运行期形参</strong>（<code>in_hw_size</code>、<code>in_width</code>），编译期无法把它变成移位。SASS 里会走浮点倒数近似（<code>I2F.RP</code> + <code>MUFU.RCP</code>），整个正向 kernel 编译出来 96 条 SASS 指令——对这样一个“搬运”kernel 来说相当可观。</p>
+              <p>还好这个 kernel 是纯带宽受限的，计算被访存盖住了，所以实测中它没成为瓶颈。真要消掉它，可以换成三维 grid（用 <code>blockIdx.z</code> 当平面号）或者把 h、w 在 host 侧预计算好传进来。</p>
+<h4>⑥ 反向 kernel：2 条宽读 + 1 条标量写，没有原子操作</h4>
+              <figure class="code-block">
+                <figcaption><span>upsample_nearest_2d.cpp : 52-78</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// 【反向】梯度回传，线程按**输入（dx，小图）**下标划分：每线程收自己那 2x2 块的 4 个 dy。
+// 4 个 dy = 2 个 Pack2X（上下两行各一个），所以是 2 条宽读；dx 只有 1 个值，标量写。
+// 【形参】命名沿用正向的套路但含义换了：in_elem_cnt 这里指 dx 的元素数（= 正向的输入数），
+//   dy_dptr 是上游梯度（大图，4 倍），dx_dptr 是要算的输入梯度（小图）。
+template&lt;typename T&gt;
+__global__ void UpsampleNearest2D2XBackward(const int32_t in_elem_cnt, const T* dy_dptr, 
+                                            const int32_t dx_height, const int32_t dx_width,
+                                            T* dx_dptr) {
+  const int32_t dx_hw_size = dx_height * dx_width;
+  CUDA_1D_KERNEL_LOOP(index, in_elem_cnt) {
+    T dx_value = 0.0;
+    const int32_t nc_idx = index / dx_hw_size;     // 与正向同样的两次除法
+    const int32_t dx_hw_off = index - nc_idx * dx_hw_size;
+    const int32_t dx_h = dx_hw_off / dx_width;
+    const int32_t dx_w = dx_hw_off - dx_h * dx_width;
+    const Pack2X&lt;T&gt;* dy_pack_dptr = reinterpret_cast&lt;const Pack2X&lt;T&gt;*&gt;(dy_dptr);  // dy 用同一个 pack 视图，因为正向就是这么写下去的
+    const Pack2X&lt;T&gt; dy_pack_value1 =
+        dy_pack_dptr[nc_idx * dx_hw_size * 2 + dx_h * 2 * dx_width + dx_w];  // dy 第 2*dx_h 行的那一个 pack：含 (2h,2w) 与 (2h,2w+1) 两个梯度
+    const Pack2X&lt;T&gt; dy_pack_value2 =
+        dy_pack_dptr[nc_idx * dx_hw_size * 2 + (dx_h * 2 + 1) * dx_width + dx_w];  // dy 第 2*dx_h+1 行：含 (2h+1,2w) 与 (2h+1,2w+1)
+    dx_value += dy_pack_value1.x;  // 4 项相加：正向里同一个 in_value 复制到 4 个位置，
+    dx_value += dy_pack_value1.y;  // 反向按链式法则就是把这 4 个位置的梯度加起来。这里是普通
+    dx_value += dy_pack_value2.x;  // 浮点加法（不是 atomicAdd）：4 项都在本线程手里，
+    dx_value += dy_pack_value2.y;  // 别的线程不会碰同一个 dx 槽位
+    dx_dptr[index] = dx_value;     // 标量写（float 时 PTX 是 st.global.b32）
+  }
+}</code></pre>
+              </figure>
+              <p>反向把方向倒过来：还是按输入（也就是 <code>dx</code>，小图）划分，但这次每个线程要<strong>收</strong>自己那 2×2 块的 4 个 <code>dy</code>。4 个 dy 正好是上下两行各一个 pack，所以是 2 条 64 位宽读；而 <code>dx</code> 每个位置只有一个值，所以是 1 条标量写。</p>
+              <div class="formula">dy_pack_value1 = dy_pack[nc_idx*dx_hw_size*2 + dx_h*2*dx_width + dx_w]       ← 含 (2h,2w)  和 (2h,2w+1)
+dy_pack_value2 = dy_pack[nc_idx*dx_hw_size*2 + (dx_h*2+1)*dx_width + dx_w]   ← 含 (2h+1,2w) 和 (2h+1,2w+1)
+
+dx_value = v1.x + v1.y + v2.x + v2.y      ← 4 项普通浮点加法
+dx_dptr[index] = dx_value                 ← 1 条标量写</div>
+              <p>这 4 项加法<strong>不是 atomicAdd</strong>。原因在第 ① 段已经说过：这 4 个 dy 位置对应的那个输入像素只有一个，而负责它的线程也只有一个，别的线程不会碰同一个 dx 槽位——不需要任何同步。这正是“按输入划分”换来的东西。</p>
+              <p>顺带一提，反向 kernel 在仓库的 <code>main</code> 里<strong>从未被调用</strong>，所以它不会被实例化进二进制。本文的性能数据是另写一个 main 显式调用它才测到的。</p>
+<h4>⑦ main：一个只验证“跑得通”的测例</h4>
+              <figure class="code-block">
+                <figcaption><span>upsample_nearest_2d.cpp : 81-107</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// 【测例】1024x1024 的输入、32 个 (n,c) 平面、倍率 2，只跑正向并打印前 50 个输出值。
+int main(){
+    float *input_host = (float*)malloc(N*sizeof(float));    // 主机输入缓冲 128MB
+    float *input_device;
+    cudaMalloc((void **)&amp;input_device, N*sizeof(float));    // 设备输入缓冲 128MB；cudaMalloc 的地址 256B 对齐，满足 Pack2X&lt;float&gt; 的 8B 要求
+    for (int i = 0; i &lt; N; i++) input_host[i] = 1.0;       // 【全 1 数据】只能验证不崩/不越界，验证不了下标映射（见文件头&quot;main 的测例…&quot;第 2 条）
+    cudaMemcpy(input_device, input_host, N*sizeof(float), cudaMemcpyHostToDevice);
+
+    float *output_host = (float*)malloc(N * 4 * sizeof(float));  // 输出 4 倍元素数 = 512MB
+    float *output_device;
+    cudaMalloc((void **)&amp;output_device, N * 4 * sizeof(float));
+
+    // 【启动配置】grid = 33,554,432/256 = 131,072 个 block，线程总数恰好 = N，
+    //   于是 grid-stride 循环每线程只走一圈。本次 kernel 的访存量：读 128MB + 写 512MB = 640MB，
+    //   写读比 4:1 —— 属于纯带宽受限，所以&quot;每条指令搬几字节&quot;直接决定性能。
+    dim3 grid(N / kBlockSize, 1);
+    dim3 block(kBlockSize, 1);
+    UpsampleNearest2D2XForward&lt;&lt;&lt;grid, block&gt;&gt;&gt;(N, input_device, 1024, 1024, output_device);  // 显式传 1024x1024；N/1024/1024 = 32 个平面
+    cudaMemcpy(output_host, output_device, N * 4 * sizeof(float), cudaMemcpyDeviceToHost);
+    for(int i = 0; i &lt; 50; i++) {
+        printf(&quot;%.5f\n&quot;, output_host[i]);   // 本机（RTX 5070 / sm_120）实测打印 50 行 1.00000，与原版一致
+    }
+
+    // 【原样保留】host 的 malloc 与 device 的 cudaMalloc 都没有释放，进程退出后由 OS 回收。
+    // 反向 kernel UpsampleNearest2D2XBackward 这里没调用，也就不会被实例化进二进制。
+    return 0;
+}</code></pre>
+              </figure>
+              <p>输入全填 <code>1.0</code>，输出打印前 50 个值——自然全是 <code>1.00000</code>。这个测例只能证明“没崩、没越界”，<strong>验证不了下标映射算得对不对</strong>（全 1 的输入下，任何映射都输出全 1）。本文的性能测试里，我换成了递增数据并与 CPU 参考实现逐元素对拍，正反向都确认输出一致。</p>
+              <p>另外这段 <code>main</code> 里没有计时代码——注释里也写明了“耗时是 README 里用 ncu 外部测的”。本文的耗时是另加 <code>cudaEvent</code> 测的。</p>
+            </section>
+            <section id="full">
+              <p class="section-label">CHAPTER 03</p>
+              <h3>完整代码</h3>
+              <p>下面是 <code>upsample_nearest_2d.cpp</code> 全文（107 行），一字未改。它是同一份 kernel 的轻注释版本（仓库里另有注释更密的 <code>_annotated.cu</code> 与零注释的原版 <code>.cu</code>，三者去掉注释后代码完全一致）。</p>
+              <figure class="code-block is-long">
+                <figcaption><span>upsample_nearest_2d.cpp · 全文 107 行</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// ============================================================================
+// upsample_nearest_2d —— OneFlow 的 2 倍最近邻上采样前后向 kernel：
+//   用 Pack2X&lt;T&gt; 把&quot;一次搬 1 个元素&quot;改成&quot;一次搬水平相邻的 2 个元素&quot;
+// ============================================================================#
+// include &lt;cuda.h&gt;          // driver API，本文件没用到（kernel 启动走的是 runtime）
+#include &lt;cuda_runtime.h&gt;  // 真正需要的：__global__、cudaMalloc/cudaMemcpy、dim3
+#include &lt;time.h&gt;          // 【未使用】main 里没有计时代码，耗时是 README 里用 ncu 外部测的
+#include &lt;algorithm&gt;       // 【未使用】
+#include &lt;iostream&gt;        // 【未使用】打印用的是 printf（随 cuda_runtime 间接引入）
+#include &lt;cuda_fp16.h&gt;     // 本文件 main 只实例化 float，这个 include 是给 T=__half 准备的
+using namespace std;       // 【本文件其实没用到 std 里的东西】reinterpret_cast 是关键字，不是 std 成员
+#define N 32*1024*1024   // 输入元素个数 33,554,432（= 32 个 1024x1024 平面）；输出是 4N
+#define kBlockSize 256   // 每 block 线程数
+
+
+#define CUDA_1D_KERNEL_LOOP(i, n)                                                                 \
+  for (int32_t i = blockIdx.x * blockDim.x + threadIdx.x, step = blockDim.x * gridDim.x; i &lt; (n); \
+       i += step)  // 【循环体末尾的 i += step】就是&quot;跳到下一个归本线程的元素&quot;
+
+
+template&lt;typename T&gt;
+struct alignas(2 * sizeof(T)) Pack2X {
+    T x;
+    T y;
+};
+
+
+// 【正向】线程按**输入**下标划分：每线程读 1 个 in 元素，把它复制成输出上的一个 2x2 块。
+// 4 个输出位置 = 2 个 Pack2X（上下两行各一个），所以是 2 条宽存储。 
+// 【形参】in_elem_cnt：输入元素总数（= N）；in_height/in_width：输入的 H、W（输出是 2 倍）；
+//   in_dptr：输入显存地址（只读）；out_dptr：输出显存地址（4 倍元素数，写）。
+template&lt;typename T&gt;
+__global__ void UpsampleNearest2D2XForward(const int32_t in_elem_cnt, const T* in_dptr,
+                                           const int32_t in_height, const int32_t in_width,
+                                           T* out_dptr){
+  const int32_t in_hw_size = in_width * in_height;  // 一个 (n,c) 平面的输入元素数；输出平面是它的 2 倍（pack 数）
+  CUDA_1D_KERNEL_LOOP(index, in_elem_cnt) {        // index 是**输入**的线性下标：index = ((n*C + c)*H + h)*W + w
+    const T in_value = in_dptr[index];             // 1 条标量读（float 时 PTX 是 ld.global.b32）
+    const int32_t nc_idx = index / in_hw_size;     // 第几个 (n,c) 平面。除数是运行期形参 → 走倒数近似，见文件头&quot;整数除法的代价&quot;
+    const int32_t hw_off = index - nc_idx * in_hw_size;  // 平面内偏移；用商反推余数，省掉一次 `%`
+    const int32_t h = hw_off / in_width;           // 输入行号（第二次除法）
+    const int32_t w = hw_off - h * in_width;       // 输入列号（同样用商反推余数）
+    Pack2X&lt;T&gt; out_value{in_value, in_value};       // 造出一个&quot;两个相同值&quot;的 pack：{x,y} = {v,v}
+    Pack2X&lt;T&gt;* out_pack_dptr = reinterpret_cast&lt;Pack2X&lt;T&gt;*&gt;(out_dptr);  // 换成 pack 视图（输出的一行有 2*in_width 个元素 = in_width 个 pack，(n,c) 平面的 pack 数是 2*in_hw_size）；要求 out_dptr 8B(float)/4B(half) 对齐，见文件头&quot;main 的测例…&quot;第 3 条
+    out_pack_dptr[nc_idx * in_hw_size * 2 + h * 2 * in_width + w] = out_value;       // 写输出的第 2h 行：覆盖 (2h,2w) 和 (2h,2w+1)。一个 warp 内 lane 只改变 w，32 个地址连续（float 时 256B 完整事务）
+    out_pack_dptr[nc_idx * in_hw_size * 2 + (h * 2 + 1) * in_width + w] = out_value; // 写输出的第 2h+1 行：覆盖 (2h+1,2w) 和 (2h+1,2w+1)。与上一条相隔 2*in_width 个元素（in_width=1024 时 8KB），也是独立的完整事务
+  }
+}
+
+
+
+// 【反向】梯度回传，线程按**输入（dx，小图）**下标划分：每线程收自己那 2x2 块的 4 个 dy。
+// 4 个 dy = 2 个 Pack2X（上下两行各一个），所以是 2 条宽读；dx 只有 1 个值，标量写。
+// 【形参】命名沿用正向的套路但含义换了：in_elem_cnt 这里指 dx 的元素数（= 正向的输入数），
+//   dy_dptr 是上游梯度（大图，4 倍），dx_dptr 是要算的输入梯度（小图）。
+template&lt;typename T&gt;
+__global__ void UpsampleNearest2D2XBackward(const int32_t in_elem_cnt, const T* dy_dptr, 
+                                            const int32_t dx_height, const int32_t dx_width,
+                                            T* dx_dptr) {
+  const int32_t dx_hw_size = dx_height * dx_width;
+  CUDA_1D_KERNEL_LOOP(index, in_elem_cnt) {
+    T dx_value = 0.0;
+    const int32_t nc_idx = index / dx_hw_size;     // 与正向同样的两次除法
+    const int32_t dx_hw_off = index - nc_idx * dx_hw_size;
+    const int32_t dx_h = dx_hw_off / dx_width;
+    const int32_t dx_w = dx_hw_off - dx_h * dx_width;
+    const Pack2X&lt;T&gt;* dy_pack_dptr = reinterpret_cast&lt;const Pack2X&lt;T&gt;*&gt;(dy_dptr);  // dy 用同一个 pack 视图，因为正向就是这么写下去的
+    const Pack2X&lt;T&gt; dy_pack_value1 =
+        dy_pack_dptr[nc_idx * dx_hw_size * 2 + dx_h * 2 * dx_width + dx_w];  // dy 第 2*dx_h 行的那一个 pack：含 (2h,2w) 与 (2h,2w+1) 两个梯度
+    const Pack2X&lt;T&gt; dy_pack_value2 =
+        dy_pack_dptr[nc_idx * dx_hw_size * 2 + (dx_h * 2 + 1) * dx_width + dx_w];  // dy 第 2*dx_h+1 行：含 (2h+1,2w) 与 (2h+1,2w+1)
+    dx_value += dy_pack_value1.x;  // 4 项相加：正向里同一个 in_value 复制到 4 个位置，
+    dx_value += dy_pack_value1.y;  // 反向按链式法则就是把这 4 个位置的梯度加起来。这里是普通
+    dx_value += dy_pack_value2.x;  // 浮点加法（不是 atomicAdd）：4 项都在本线程手里，
+    dx_value += dy_pack_value2.y;  // 别的线程不会碰同一个 dx 槽位
+    dx_dptr[index] = dx_value;     // 标量写（float 时 PTX 是 st.global.b32）
+  }
+}
+
+
+// 【测例】1024x1024 的输入、32 个 (n,c) 平面、倍率 2，只跑正向并打印前 50 个输出值。
+int main(){
+    float *input_host = (float*)malloc(N*sizeof(float));    // 主机输入缓冲 128MB
+    float *input_device;
+    cudaMalloc((void **)&amp;input_device, N*sizeof(float));    // 设备输入缓冲 128MB；cudaMalloc 的地址 256B 对齐，满足 Pack2X&lt;float&gt; 的 8B 要求
+    for (int i = 0; i &lt; N; i++) input_host[i] = 1.0;       // 【全 1 数据】只能验证不崩/不越界，验证不了下标映射（见文件头&quot;main 的测例…&quot;第 2 条）
+    cudaMemcpy(input_device, input_host, N*sizeof(float), cudaMemcpyHostToDevice);
+
+    float *output_host = (float*)malloc(N * 4 * sizeof(float));  // 输出 4 倍元素数 = 512MB
+    float *output_device;
+    cudaMalloc((void **)&amp;output_device, N * 4 * sizeof(float));
+
+    // 【启动配置】grid = 33,554,432/256 = 131,072 个 block，线程总数恰好 = N，
+    //   于是 grid-stride 循环每线程只走一圈。本次 kernel 的访存量：读 128MB + 写 512MB = 640MB，
+    //   写读比 4:1 —— 属于纯带宽受限，所以&quot;每条指令搬几字节&quot;直接决定性能。
+    dim3 grid(N / kBlockSize, 1);
+    dim3 block(kBlockSize, 1);
+    UpsampleNearest2D2XForward&lt;&lt;&lt;grid, block&gt;&gt;&gt;(N, input_device, 1024, 1024, output_device);  // 显式传 1024x1024；N/1024/1024 = 32 个平面
+    cudaMemcpy(output_host, output_device, N * 4 * sizeof(float), cudaMemcpyDeviceToHost);
+    for(int i = 0; i &lt; 50; i++) {
+        printf(&quot;%.5f\n&quot;, output_host[i]);   // 本机（RTX 5070 / sm_120）实测打印 50 行 1.00000，与原版一致
+    }
+
+    // 【原样保留】host 的 malloc 与 device 的 cudaMalloc 都没有释放，进程退出后由 OS 回收。
+    // 反向 kernel UpsampleNearest2D2XBackward 这里没调用，也就不会被实例化进二进制。
+    return 0;
+}</code></pre>
+              </figure>
+              <div class="callout"><span class="callout-title">两点使用前提</span><p><strong>输出指针必须对齐</strong>：<code>Pack2X&lt;float&gt;</code> 要求 8 字节、<code>Pack2X&lt;half&gt;</code> 要求 4 字节。<code>cudaMalloc</code> 返回的地址是 256 字节对齐，常规用法没问题；但如果你从一个更大的缓冲区里按元素切一段传进来，就可能踩到非对齐地址。</p><p><strong>下标全程 int32</strong>：<code>in_elem_cnt</code> 必须小于 2³⁰，否则中间的乘法会溢出。本文的 2²⁵ 在安全范围内。</p></div>
+            </section>
+            <section id="perf">
+              <p class="section-label">CHAPTER 04</p>
+              <h3>实测性能对比分析</h3>
+              <p>数据规模 <code>N = 32×1024×1024 = 33,554,432</code> 个输入元素，即 32 个 1024×1024 的平面（输入 float 128 MiB、输出 512 MiB）。一次正向或反向的访存量都是 <code>(1+4) × N × sizeof(T)</code> = float 640 MB / half 320 MB，读写比 1:4，是典型的写多读少。</p>
+              <p>对照的<strong>基线</strong>是我另写的朴素版本：每个输出元素一个线程、纯标量访存。要特别说明的是——朴素反向版本因为按输出划分，4 个梯度分散在不同线程手里，<strong>必须用 atomicAdd</strong>。所以下面这组对比不只是“打包 vs 不打包”，也是“原子加 vs 无原子加”。</p>
+<h4>本机实测（RTX 5070）</h4>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>数据类型</th><th>方向</th><th>实现</th><th class="num">耗时 (µs)</th><th class="num">等效带宽 (GB/s)</th><th class="num">相对基线</th></tr></thead>
+                  <tbody>
+                  <tr><td>float</td><td>正向</td><td>朴素（1 线程 1 输出）</td><td class="num">1553.5</td><td class="num">432.0</td><td class="num">1.00×</td></tr>
+                  <tr class="is-best"><td>float</td><td>正向</td><td>OneFlow Pack2X</td><td class="num">1219.5</td><td class="num">550.3</td><td class="num"><strong>1.27×</strong></td></tr>
+                  <tr><td>float</td><td>反向</td><td>朴素（含 atomicAdd）</td><td class="num">1466.3</td><td class="num">457.7</td><td class="num">1.00×</td></tr>
+                  <tr class="is-best"><td>float</td><td>反向</td><td>OneFlow Pack2X</td><td class="num">1092.3</td><td class="num">614.4</td><td class="num"><strong>1.34×</strong></td></tr>
+                  <tr><td>half</td><td>正向</td><td>朴素（1 线程 1 输出）</td><td class="num">1379.2</td><td class="num">243.3</td><td class="num">1.00×</td></tr>
+                  <tr class="is-best"><td>half</td><td>正向</td><td>OneFlow Pack2X</td><td class="num">609.1</td><td class="num">550.9</td><td class="num"><strong>2.26×</strong></td></tr>
+                  <tr><td>half</td><td>反向</td><td>朴素（含 atomicAdd）</td><td class="num">4203.1</td><td class="num">79.8</td><td class="num">1.00×</td></tr>
+                  <tr class="is-best"><td>half</td><td>反向</td><td>OneFlow Pack2X</td><td class="num">543.7</td><td class="num">617.1</td><td class="num"><strong>7.73×</strong></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>四组数据里，<strong>half 反向那 7.73 倍是全部文章里最悬殊的一个数字</strong>，而且它的原因不在打包访存上——朴素版只跑到 79.8 GB/s，是峰值带宽的 12%，这个速度根本不是“访存慢”，而是<strong>被原子操作拖住了</strong>。</p>
+              <p>逐条看为什么会这样：</p>
+              <p><strong>half + 反向 = 最坏组合。</strong>朴素版要对同一个 <code>dx</code> 槽位做 4 次原子加，而 half 的原子加只有 2 字节宽，占不满硬件的原子通路；33.5M 个半精度原子操作在 L2 上排队，直接把整条流水线堵死。OneFlow 版本把 4 个梯度收进同一个线程做普通加法，<strong>一个原子操作都没有</strong>，于是它跑回了正常的访存速度（617 GB/s，峰值占用 92%）。</p>
+              <p><strong>float + 反向（1.34×）比 half 温和得多</strong>，因为 4 字节的原子加比 2 字节的效率高，朴素版还能跑到 457.7 GB/s，没有到堵死的程度。</p>
+              <p><strong>正向没有原子操作，差距只来自访存宽度。</strong>float 正向朴素版 432 GB/s（因为每个输出位置都要独立算一遍下标、独立发一条 4 字节写，warp 内的写地址还因为 2×2 复制而不连续），打包后升到 550 GB/s；half 正向从 243 GB/s 升到 551 GB/s——朴素版的 2 字节写只用到通路的一小截，打包成 4 字节的 <code>Pack2X&lt;half&gt;</code> 后正好填满，翻了一倍多。</p>
+<h4>和 A100 上的数据对照</h4>
+              <p>仓库 README 里有一组 A100-PCIE-40GB 上的 profile 数据，对比的是 PyTorch 与 OneFlow 各自的上采样实现，注意<strong>数据规模不同</strong>：那组用的是 <code>16×32×80×80</code> 的输入（OneFlow 官方脚本），不是本文的 32×1024×1024，所以绝对耗时不可直接比：</p>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>框架</th><th>数据类型</th><th>方向</th><th class="num">带宽利用率</th><th class="num">耗时 (µs)</th></tr></thead>
+                  <tbody>
+                  <tr><td>PyTorch</td><td>Float32</td><td>正向</td><td class="num">28.30%</td><td class="num">111.42</td></tr>
+                  <tr><td>PyTorch</td><td>Float32</td><td>反向</td><td class="num">60.16%</td><td class="num">65.12</td></tr>
+                  <tr><td>OneFlow</td><td>Float32</td><td>正向</td><td class="num">52.18%</td><td class="num">61.44</td></tr>
+                  <tr><td>OneFlow</td><td>Float32</td><td>反向</td><td class="num">77.66%</td><td class="num">50.56</td></tr>
+                  <tr><td>PyTorch</td><td>Float16</td><td>正向</td><td class="num">16.99%</td><td class="num">100.38</td></tr>
+                  <tr><td>PyTorch</td><td>Float16</td><td>反向</td><td class="num">31.56%</td><td class="num">57.38</td></tr>
+                  <tr><td>OneFlow</td><td>Float16</td><td>正向</td><td class="num">43.26%</td><td class="num">35.36</td></tr>
+                  <tr><td>OneFlow</td><td>Float16</td><td>反向</td><td class="num">44.82%</td><td class="num">40.26</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>两份数据的结论方向是一致的：<strong>float 上提升有限，half 上提升显著</strong>。A100 上 OneFlow 相对 PyTorch：float 正向 1.81×、float 反向 1.29×、half 正向 2.84×、half 反向 1.43×。本文的对照反过来（float 提升小、half 提升大）也符合这个规律——窄类型在窄访问下的损失更大，补上宽度后收益也更大。</p>
+              <p>差别在于<strong>反向的幅度</strong>：A100 上 half 反向只快 1.43×，本机快 7.73×。原因是两份工作的基线不同——A100 那组比的是 PyTorch 的 kernel，它虽然也有原子操作，但实现方式和我写的朴素版不一样，没有落到“2 字节原子加堵死 L2”这个最坏情况里。</p>
+            </section>
+            <section id="summary">
+              <p class="section-label">CHAPTER 05</p>
+              <h3>小结</h3>
+              <p>这个算子给我们两个可以带走的结论。</p>
+<div class="callout"><span class="callout-title">结论一：划分方式决定要不要原子操作</span><p>正向“一个输入变成 4 个输出”、反向“4 个梯度并成 1 个输入”——这两种多对一、一对多的关系，如果按输出划分线程，就必须靠 <code>atomicAdd</code> 解决写冲突；按输入划分，一个线程负责完整的 2×2 块，冲突自然消失。</p><p><strong>在动手写 atomicAdd 之前，先想想能不能改划分方式。</strong>本文的实测里，这一条在 half 反向值 7.73 倍——比任何指令级优化都值钱。</p></div>
+<div class="callout"><span class="callout-title">结论二：Pack2X 是“刚好够用”的宽度</span><p>它只把两个元素绑在一起，没有追求一次搬满 16 字节。原因很实际：正向的 4 个输出位置本来就是“上下两行各两个”，水平方向相邻的两个必须写同一个值——<strong>打包 2 个是数据结构决定的，不是硬凑的</strong>。</p><p>这和 elementwise 里那个“包宽由 16 字节除以元素大小算出来”的思路不同：那边是让编译器算最优宽度，这边是根据语义事实选一个刚好贴合的宽度。两种都成立，但后者通常更简单、也更好理解。</p></div>
+              <p>下一篇：<a class="inline-link" href="gemv.html">GEMV 矩阵向量乘</a>——换一类问题：这次瓶颈不再是写宽度，而是“一个 warp 怎么协作算出一行点积”。</p>
+            </section>
+            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>03 / READING</span></div>
+    </div>
+  </body>
+</html>

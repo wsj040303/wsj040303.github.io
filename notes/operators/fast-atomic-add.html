@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUDA half atomicAdd 优化精读：pack2 与 fastAtomicAdd 两条凑宽度路径的代码拆解，附 RTX 5070 实测与 A100 数据对照。">
+    <meta name="theme-color" content="#101113">
+    <title>半精度原子加 · 把 2 字节凑成 4 字节 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a><a href="../../ai-infra/">AI Infra</a><a href="../../projects/">GitHub 项目</a><a href="../../resources/">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>半精度原子加</nav>
+        <div class="reader-heading">
+          <p class="eyebrow">AI INFRA / OPERATORS / 05</p>
+          <h1>半精度原子加</h1>
+          <p>3350 万个线程往同一个地址做原子加。half 的原子操作只有 2 字节宽，占不满通路——三个版本用两种思路把它凑成 4 字节，本机实测 1.22 倍，而 A100 上是 3.08 倍。</p>
+        </div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>章节目录</summary>
+              <nav aria-label="本文章节目录">
+                <ol class="chapter-list">
+                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
+                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
+                  <li><a href="#full"><small>02</small> 完整代码</a></li>
+                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
+                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                </ol>
+              </nav>
+            </details>
+          </aside>
+          <article class="reader-content">
+            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
+            <section id="what">
+              <p class="section-label">CHAPTER 01</p>
+              <h3>算子在做什么，先看一个算例</h3>
+              <p>这一篇不是一个神经网络算子，而是一个<strong>底层原语</strong>：<code>atomicAdd</code>——多个线程往同一个地址做加法时，保证结果不丢的原子操作。</p>
+              <p>它出现在所有“多对一”的累加场合：reduce 的收尾、稀疏 embedding 的梯度累加、直方图统计、bias 聚合。这篇文章要问的是一个很具体的问题：<strong>当累加的量是 half（2 字节）时，为什么 <code>atomicAdd</code> 会变得很慢，以及怎么让它快起来。</strong></p>
+<h4>先看 atomicAdd 为什么不能省</h4>
+              <p>普通的 <code>c[i] = c[i] + v</code> 是“读—改—写”三步。如果两个线程同时做这件事，它们可能都读到同一个旧值、各自加完再写回，后写的那个会盖掉先写的——一次加法凭空消失。<code>atomicAdd</code> 把这三步做成一个不可分割的整体，由硬件在 L2 上完成：同一个地址的操作会排队串行，但每个操作一定生效。</p>
+              <p>代价也随之而来：<strong>同一地址的原子操作吞吐，取决于每次搬运的字节数</strong>。硬件通路按 32 位粒度组织，一次搬 2 字节就是只填了四分之一。这篇文章的三个版本，做的就是同一件事的三种做法：<strong>把每次原子操作的宽度凑到 4 字节。</strong></p>
+<h4>测例：一个刻意造出来的最坏情况</h4>
+              <p>测例是 half 向量内积 <code>c = Σ a[i]*b[i]</code>，但重点不在内积本身。数据规模 <code>N = 32×1024×1024 = 33,554,432</code>，启动配置是 131072 个 block × 256 线程——<strong>线程总数恰好等于 N</strong>。</p>
+              <div class="formula">阶段①  每个线程读 a[gid]、b[gid]，乘起来累进自己的寄存器 temp
+        （每线程只有 1 个元素，所以这一阶段几乎不花时间）
+
+阶段②  33,554,432 个线程，每个发一条 atomicAdd
+        全部打向 c 这唯一一个地址
+
+这不是一个真实负载会出现的形态——真实的内积会先在 block 内归约。
+它是&lt;strong&gt;故意构造的最坏竞争场景&lt;/strong&gt;，
+目的就是把“33.5M 条同地址原子操作”这个成本单独放到显微镜下看。</div>
+<h4>一个必须知道的坑：结果是 32，不是 335544.32</h4>
+              <p>这个测例的数学真值是 <code>33,554,432 × 0.1 × 0.1 = 335,544.32</code>。但三个版本打印出来的是 <strong>32、64、32</strong>。这不是 bug，是 half 的精度问题，而且它和原子加的宽度<strong>毫无关系</strong>——三个版本都有这个问题。</p>
+              <div class="formula">输出缓冲 c 是 half 类型，累加过程是这样发生的：
+
+  每轮加进来的增量 = 0.1 × 0.1 = 0.01
+
+  当 c 涨到 32 附近时，half 在这个量级的 ulp（相邻可表示数之间的间隔）
+  = 0.03125，而 ulp/2 = 0.015625
+
+  增量 0.01 &lt; 0.015625  →  加进去之后被舍回原值
+  →  c 冻在 32，之后再怎么加都不动了
+
+v1 冻在 64 而不是 32：它每次原子加贡献的是两个乘积之和 = 0.02，
+   在 64 处的 ulp/2 = 0.03125 &gt; 0.02，所以能多撑一级。
+
+另外：真值 335,544 远超 half 的表示上限 65504，本来就会溢出。
+     —— 真实的内积必须在 float 里累加。</div>
+              <div class="callout"><span class="callout-title">这个坑本身就是结论的一部分</span><p>一个用 half 累加的内积，无论原子加优化得多快，算出来的都是错的值。所以下面性能一节的数字，<strong>衡量的是原子操作的吞吐，不是这个内积算得对不对</strong>。三个版本的对拍方式也因此只能是“对拍打印值是否与预期一致”，仓库里本来就没有正确性校验代码。</p></div>
+            </section>
+            <section id="walk">
+              <p class="section-label">CHAPTER 02</p>
+              <h3>代码逐段解析</h3>
+              <p>三个版本共享同一个 kernel 骨架——网格步长循环 + 每个线程最后发一条原子指令——差别只在<strong>那条原子指令怎么写</strong>。</p>
+<h4>① v0：基线，2 字节的 half 原子加</h4>
+              <figure class="code-block">
+                <figcaption><span>atomic_add_half.cpp : 15-29 · kernel</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>
+
+// 【函数功能】两阶段内积 c = Σ a[i]*b[i]：
+//   阶段① 每线程把分给自己的 a[gid]*b[gid] 累进寄存器 temp；
+//   阶段② 每线程把自己那份 temp 用一条 atomicAdd 汇入同一个地址 c。
+__global__ void dot(half* a, half* b, half* c, int n) {
+    const int nStep = gridDim.x * blockDim.x;           //【grid-stride 步长】nStep = 总线程数 = N
+    half temp = 0.0;               // 【线程私有的部分和】从 half 常量 0.0 起步
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    while (gid &lt; n) {
+        temp = temp + a[gid] * b[gid];
+        gid += nStep;    // 跳到下一个归本线程的元素
+    }
+    atomicAdd(c, temp);// 【本版的主角】2 字节宽的原子加：33,554,432 个线程全往 c 这一个地址发 atom.add.noftz.f16
+}</code></pre>
+              </figure>
+              <p>第 27 行 <code>atomicAdd(c, temp)</code> 就是全部。<code>c</code> 是 <code>half*</code>，所以这一条会编译成 PTX 的 <code>atom.add.noftz.f16</code>——<strong>一次改 2 字节</strong>。</p>
+              <p>原生支持情况要分清楚（这两个门槛不一样，很容易记混）：</p>
+              <div class="formula">atomicAdd(__half2*)   4 字节    compute capability 6.x 及以上原生支持
+                                 更老的架构走 atomicCAS 循环模拟
+
+atomicAdd(__half*)    2 字节    整个函数被 #if __CUDA_ARCH__ &gt;= 700 包住
+                                 即单 half 的原子加需要 sm_70+</div>
+              <p>本机是 sm_120，两条路径都是硬件原生实现，不经过 CAS 模拟。<code>atom.add.noftz.f16</code> 里的 <code>noftz</code> 是“不清除非规格化数”——对 half 的加法语义有细微影响，但不是本文关心的重点。</p>
+              <div class="callout"><span class="callout-title">half2 的原子性只保证“分别”原子</span><p>CUDA 文档里有明确说明：对 <code>__half2</code> 的原子操作，原子性是对 <strong>两个 half 分量分别</strong>成立的，<strong>不保证整个 32 位作为一个整体原子</strong>。这一点在下一节的 v2 里会变得很关键——因为 v2 正是靠“给邻居 lane 加 0”来凑宽度的，它依赖于两个分量互不干扰。</p></div>
+<h4>② v1：改数据视图，把两个 half 打包</h4>
+              <figure class="code-block">
+                <figcaption><span>atomic_add_half_pack2.cpp : 26-48 · Pack + AtomicAdd</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>//   数组排布就可能落在奇数地址上，后面 reinterpret_cast 成 half2* 就破坏对齐。
+template&lt;typename T, size_t pack_size&gt;
+struct alignas(sizeof(T) * pack_size) Pack {
+  T elem[pack_size];
+};
+
+
+template&lt;typename T, int32_t pack_size&gt;
+__device__ __inline__ void AtomicAdd(Pack&lt;T, pack_size&gt;* address,
+                                     T val) {
+#pragma unroll
+  for (int i = 0; i &lt; pack_size; ++i) {
+    atomicAdd(reinterpret_cast&lt;T*&gt;(address) + i, static_cast&lt;T&gt;(val));
+  }
+}                
+
+template&lt;&gt;
+__device__ __inline__ void AtomicAdd&lt;half, 2&gt;(Pack&lt;half, 2&gt;* address, half val) {
+    half2 h2_val;
+    h2_val.x = static_cast&lt;half&gt;(val);
+    h2_val.y = static_cast&lt;half&gt;(val);
+    atomicAdd(reinterpret_cast&lt;half2*&gt;(address), h2_val);
+}</code></pre>
+              </figure>
+              <p>思路很直接：既然一条原子指令只有 2 字节，那就让<strong>每次原子操作管两个元素</strong>。做法是换一套访存视图——不再把数组当 <code>half*</code>，而是当 <code>Pack&lt;half, 2&gt;*</code>（两个 half 一组），这样相邻两个 half 在同一个 4 字节槽里，一条 <code>atomicAdd(__half2*)</code> 就能一起改。</p>
+              <p><code>alignas(sizeof(T) * pack_size)</code> 又是那个关键开关——它把 <code>Pack&lt;half, 2&gt;</code> 的对齐抬到 4 字节，否则 <code>reinterpret_cast&lt;half2*&gt;</code> 就可能在奇数地址上，破坏对齐。</p>
+              <figure class="code-block">
+                <figcaption><span>atomic_add_half_pack2.cpp : 51-62 · kernel</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>__global__ void dot(Pack&lt;T, pack_size&gt;* a, Pack&lt;T, pack_size&gt;* b, Pack&lt;T, pack_size&gt;* c, int n){ // 实例化：T=half、pack_size=2（见 main 里的 dot&lt;half, 2&gt;&lt;&lt;&lt;...&gt;&gt;&gt;）
+    const int nStep = gridDim.x * blockDim.x; // 线程总数 = N，组数 = N/2 → 多数线程空转一圈
+    T temp = 0.0;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x; 
+    while (gid &lt; n / pack_size) { // 只遍历组；n 为奇数时会漏掉末尾元素（见文件头&quot;长度对齐&quot;）
+        for (int i = 0; i &lt; pack_size; i++) { // 【一组 2 个元素都乘进来】a[gid].elem[i] 就是原来第 2*gid+i 个 half
+            temp = temp + a[gid].elem[i] * b[gid].elem[i];
+        }
+        gid += nStep;
+    }
+    AtomicAdd&lt;T, pack_size&gt;(c, temp); // 【每个线程一次 half2 原子加】后一半线程在这里加了个 0，次数与 v0 持平
+}</code></pre>
+              </figure>
+              <p>第 54 行的循环上界变成了 <code>n / pack_size</code>——只遍历“组”，每组两个元素都在循环体里乘进来（第 55-57 行）。</p>
+              <div class="formula">v0：线程 i 处理元素 i，累加 1 个乘积，发 1 条 2 字节原子加
+v1：线程 i 处理元素 {2i, 2i+1}，累加 2 个乘积，发 1 条 4 字节原子加
+
+原子指令&lt;strong&gt;条数没变&lt;/strong&gt;（线程数还是 33.5M），
+但每次搬运的字节数翻倍。</div>
+              <p>两个硬约束：数组长度必须能被 2 整除，而且基地址必须 4 字节对齐。这两个要求意味着 v1 不是一个能直接丢进通用库的方案——它要求调用方保证数据布局，而真实场景里的缓冲区往往是从别处切出来的一段，未必满足。这正是 v2 要解决的问题。</p>
+<h4>③ v2：不动数据，只在对齐上做文章</h4>
+              <figure class="code-block">
+                <figcaption><span>fast_atomic_add_half.cu : 15-41 · FastSpecializedAtomicAdd</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>template&lt;typename T, typename std::enable_if&lt;std::is_same&lt;half, T&gt;::value&gt;::type* = nullptr&gt;
+__device__ __forceinline__ void FastSpecializedAtomicAdd(T* base, size_t offset,
+                                                         const size_t length, T value) {
+#if ((defined(CUDA_VERSION) &amp;&amp; (CUDA_VERSION &lt; 10000)) \
+     || (defined(__CUDA_ARCH__) &amp;&amp; (__CUDA_ARCH__ &lt; 700)))
+  atomicAdd(reinterpret_cast&lt;half*&gt;(base) + offset, static_cast&lt;half&gt;(value));
+#else
+  // Accounts for the chance base falls on an odd 16 bit alignment (ie, not 32 bit aligned)
+  __half* target_addr = reinterpret_cast&lt;__half*&gt;(base + offset);
+  bool low_byte = (reinterpret_cast&lt;std::uintptr_t&gt;(target_addr) % sizeof(__half2) == 0);
+
+  if (low_byte &amp;&amp; offset &lt; (length - 1)) {
+    __half2 value2;
+    value2.x = value;
+    value2.y = __float2half_rz(0);
+    atomicAdd(reinterpret_cast&lt;__half2*&gt;(target_addr), value2);
+
+  } else if (!low_byte &amp;&amp; offset &gt; 0) {
+    __half2 value2;
+    value2.x = __float2half_rz(0);
+    value2.y = value;
+    atomicAdd(reinterpret_cast&lt;__half2*&gt;(target_addr - 1), value2);
+
+  } else {
+    atomicAdd(reinterpret_cast&lt;__half*&gt;(base) + offset, static_cast&lt;__half&gt;(value));
+  }
+#endif</code></pre>
+              </figure>
+              <p>这一版的思路完全不同：<strong>数据和视图都不动</strong>，只在原子加调用的那一刻判断“目标地址是不是 4 字节对齐”，能凑成就用 4 字节，凑不成退回 2 字节。</p>
+              <div class="formula">low_byte = (目标地址 % sizeof(__half2) == 0)
+           即目标 half 是否落在某个 4 字节槽的&lt;strong&gt;低半&lt;/strong&gt;（x lane）
+
+分支 1  low_byte 且不是末元素：向本槽原子加 {value, 0}
+        → 本槽真加，右邻居加 0（不改它的值）
+分支 2  不是 low_byte 且不是首元素：向左借一格，原子加 {0, value}
+        → 目标在高半，往左邻居那个槽里加 {0, value}
+分支 3  贴边界凑不成对：退回 2 字节 atomicAdd(__half*)</div>
+              <p>关键在第 1、2 分支的“<strong>给邻居加 0</strong>”：因为 <code>__half2</code> 的原子性对两个分量分别成立，给邻居 lane 加 0 不会改变邻居的值，所以这个操作<strong>既拿到了 4 字节的宽度，又没有副作用</strong>。分支 3 是兜底：当目标正好是首元素且地址不对齐、或者末元素且右边没格子时，凑不成对，就老老实实做一次 2 字节加法——正确性优先，快慢其次。</p>
+              <p>本测例的调用是 <code>FastAdd(c, 0, 2, temp)</code>：offset=0、length=2，而 <code>cudaMalloc</code> 返回的地址必然是 4 字节对齐的，所以<strong>恒定走分支 1</strong>。这也意味着 <code>c[1]</code> 全程被动地加了一路 0——白占了一半事务。</p>
+              <figure class="code-block">
+                <figcaption><span>fast_atomic_add_half.cu : 43-52 · 类型分派与 FastAdd</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>
+template&lt;typename T, typename std::enable_if&lt;!std::is_same&lt;half, T&gt;::value&gt;::type* = nullptr&gt;
+__device__ __forceinline__ void FastSpecializedAtomicAdd(T* base, size_t offset,
+                                                         const size_t length, T value) {
+  atomicAdd(base + offset, value);
+}
+
+template&lt;class T&gt;
+__device__ __forceinline__ void FastAdd(T* base, size_t offset, const size_t length, T value) {
+  FastSpecializedAtomicAdd(base, offset, length, value);</code></pre>
+              </figure>
+              <p>两个 <code>FastSpecializedAtomicAdd</code> 重载靠 SFINAE 区分：<code>std::is_same&lt;half, T&gt;</code> 为真走上面那个（有三分支），否则透传给普通 <code>atomicAdd</code>——所以这个函数对 float、double 也能用，只是不做任何花活。<code>FastAdd</code> 只是给了一个更短的名字。</p>
+              <figure class="code-block">
+                <figcaption><span>fast_atomic_add_half.cu : 57-68 · kernel</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>
+__global__ void dot(half* a, half* b, half* c, int n){
+    const int nStep = gridDim.x * blockDim.x;
+    half temp = 0.0;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    while (gid &lt; n) {
+        temp = temp + a[gid] * b[gid];
+        gid += nStep;
+    }
+    // atomicAdd(c, temp);
+    FastAdd(c, 0, 2, temp);
+}</code></pre>
+              </figure>
+              <p>kernel 和 v0 几乎一样，唯一区别是最后那行从 <code>atomicAdd(c, temp)</code> 换成了 <code>FastAdd(c, 0, 2, temp)</code>。第 66 行那句被注释掉的 <code>atomicAdd(c, temp)</code> 是原作者留的对照，方便切换两种实现。</p>
+              <div class="callout"><span class="callout-title">这不是 CAS 循环</span><p>“fastAtomicAdd”这个名字容易让人以为是手写的比较交换循环。在 sm_70 及以上、CUDA 10 以上的环境下（本机 sm_120 / CUDA 13.4 就在这个范围内），三个分支最终都直接调用硬件 <code>atomicAdd</code>，<strong>没有任何手写的 CAS</strong>。</p><p>代码顶部那行 <code>#if CUDA_VERSION &lt; 10000 || __CUDA_ARCH__ &lt; 700</code> 才会整段退化到 2 字节分支；而常说的 atomicCAS 循环模拟只存在于 sm_60 以下的 <code>cuda_fp16.hpp</code> 实现里，本机不经过。</p><p>这份实现是移植自 PyTorch 的 <code>aten/src/ATen/native/cuda/KernelUtils.cuh</code>。</p></div>
+            </section>
+            <section id="full">
+              <p class="section-label">CHAPTER 03</p>
+              <h3>完整代码</h3>
+              <p>三个版本都很短，这里全部贴出。v0 和 v1 用 <code>.cpp</code> 版本，v2 用仓库的正式实现 <code>fast_atomic_add_half.cu</code>——原因是 <code>v2/fast_atomic_add_half.cpp</code> 那份工作副本本身是<strong>残缺的</strong>：它在 <code>FastSpecializedAtomicAdd</code> 的非 half 重载处截断，没有 <code>FastAdd</code>、没有 <code>dot</code> kernel、也没有 <code>main</code>，而且中间有个拼写错误 <code>atmonicAdd</code>，无法编译。</p>
+              <figure class="code-block">
+                <figcaption><span>v0 / atomic_add_half.cpp · 全文 67 行</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// ============================================================================
+// atomic_add_half (v0) —— 基线：对每个 block 的部分和用纯 __half 的 atomicAdd
+// ============================================================================
+
+#include &lt;cuda.h&gt;
+#include &lt;cuda_runtime.h&gt;
+#include &lt;time.h&gt; // 【time.h 其实没用到：main 里没有计时代码，耗时靠 ncu 外部测】
+#include &lt;algorithm&gt;
+#include &lt;iostream&gt;
+#include &lt;cuda_fp16.h&gt;
+
+using namespace std;
+#define N 32*1024*1024  // 数组长度：33,554,432 个 half
+#define kBlockSize 256
+
+
+// 【函数功能】两阶段内积 c = Σ a[i]*b[i]：
+//   阶段① 每线程把分给自己的 a[gid]*b[gid] 累进寄存器 temp；
+//   阶段② 每线程把自己那份 temp 用一条 atomicAdd 汇入同一个地址 c。
+__global__ void dot(half* a, half* b, half* c, int n) {
+    const int nStep = gridDim.x * blockDim.x;           //【grid-stride 步长】nStep = 总线程数 = N
+    half temp = 0.0;               // 【线程私有的部分和】从 half 常量 0.0 起步
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    while (gid &lt; n) {
+        temp = temp + a[gid] * b[gid];
+        gid += nStep;    // 跳到下一个归本线程的元素
+    }
+    atomicAdd(c, temp);// 【本版的主角】2 字节宽的原子加：33,554,432 个线程全往 c 这一个地址发 atom.add.noftz.f16
+}
+
+
+int main(){
+    half *x_host = (half*)malloc(N * sizeof(half));
+    half *x_device;
+    cudaMalloc((void **)&amp;x_device, N*sizeof(half));
+    for (int i = 0; i &lt; N; i ++) x_host[i] = 0.1;
+    cudaMemcpy(x_device, x_host, N*sizeof(half), cudaMemcpyHostToDevice);
+
+    half *y_host = (half*)malloc(N * sizeof(half));
+    half *y_device;
+    cudaMalloc((void **)&amp;y_device, N*sizeof(half));
+    for (int i = 0;i &lt; N; i ++) y_host[i] = 0.1;
+    cudaMemcpy(y_device, y_host, N*sizeof(half), cudaMemcpyHostToDevice);
+
+    half *output_host = (half*)malloc(sizeof(half));
+    half *output_device;
+    cudaMalloc((void **)&amp;output_device, sizeof(half));
+    cudaMemset(output_device, 0, sizeof(half));
+
+        // 【网格配置】block_num = (N+255)/256 = 131072，线程总数 = N，
+    //   与 v1/v2 完全一致（README 第 6 行：长度和 grid/block 全部对齐才好对比）。
+    int32_t block_num = (N + kBlockSize - 1) / kBlockSize;
+    dim3 grid(block_num, 1);
+    dim3 block(kBlockSize, 1);
+    dot&lt;&lt;&lt;grid, block&gt;&gt;&gt;(x_device, y_device, output_device, N); // 实参对形参：a←x_device、b←y_device、c←output_device（就那 1 个 half 槽）、n←N
+    cudaMemcpy(output_host, output_device, sizeof(half), cudaMemcpyDeviceToHost);
+    printf(&quot;%.6f\n&quot;, static_cast&lt;double&gt;(output_host[0])); // 【打印】实测 32.000000：增量 ~0.01，涨到 32 后 ulp=0.03125，加法被舍回原值（见文件头&quot;坑 2&quot;）
+    free(x_host);
+    free(y_host);
+    free(output_host);
+    cudaFree(x_device);
+    cudaFree(y_device);
+    cudaFree(output_device);
+
+}
+
+</code></pre>
+              </figure>
+              <figure class="code-block">
+                <figcaption><span>v1 / atomic_add_half_pack2.cpp · 全文 101 行</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// ============================================================================
+// atomic_add_half_pack2 (v1) —— 手写 pack：把两个相邻 half 打包成 __half2，
+//                                最后一次 4 字节宽的 atomicAdd
+// ============================================================================
+
+//相比v0改的只有两点：
+//     1) 访存视图：不再把数组当成 half*，而是当成 Pack&lt;half,2&gt;*（两个 half 一组），
+//        线程 i 处理第 i 组的 2 个元素，所以循环上界变成 n / pack_size；
+//     2) 原子加：不再 atomicAdd(half*)，而是把 temp 塞进 half2 的两个 lane
+//        （x 和 y 都放同一个值），一次 atomicAdd(__half2*)，一次改 4 字节。
+//   v0 每次原子操作只搬 2 字节，占不满按 32-bit 粒度组织的访存/原子通路；
+//   这里次数不变、每次宽度翻倍，A100 实测从 422.36ms 降到 137.02ms（README 表）。
+
+
+#include &lt;cuda.h&gt;
+#include &lt;cuda_runtime.h&gt;
+#include &lt;time.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;iostream&gt;
+#include &lt;cuda_fp16.h&gt;
+using namespace std;
+#define N 32*1024*1024   // 元素个数（half 计），必须是 pack_size 的偶数倍，见文件头
+#define kBlockSize 256
+
+// 【pack 类型】alignas(4) 是灵魂：没有它，Pack&lt;half,2&gt; 只按成员最大对齐(2)，
+//   数组排布就可能落在奇数地址上，后面 reinterpret_cast 成 half2* 就破坏对齐。
+template&lt;typename T, size_t pack_size&gt;
+struct alignas(sizeof(T) * pack_size) Pack {
+  T elem[pack_size];
+};
+
+
+template&lt;typename T, int32_t pack_size&gt;
+__device__ __inline__ void AtomicAdd(Pack&lt;T, pack_size&gt;* address,
+                                     T val) {
+#pragma unroll
+  for (int i = 0; i &lt; pack_size; ++i) {
+    atomicAdd(reinterpret_cast&lt;T*&gt;(address) + i, static_cast&lt;T&gt;(val));
+  }
+}                
+
+template&lt;&gt;
+__device__ __inline__ void AtomicAdd&lt;half, 2&gt;(Pack&lt;half, 2&gt;* address, half val) {
+    half2 h2_val;
+    h2_val.x = static_cast&lt;half&gt;(val);
+    h2_val.y = static_cast&lt;half&gt;(val);
+    atomicAdd(reinterpret_cast&lt;half2*&gt;(address), h2_val);
+}
+
+template&lt;typename T, int32_t pack_size&gt;
+__global__ void dot(Pack&lt;T, pack_size&gt;* a, Pack&lt;T, pack_size&gt;* b, Pack&lt;T, pack_size&gt;* c, int n){ // 实例化：T=half、pack_size=2（见 main 里的 dot&lt;half, 2&gt;&lt;&lt;&lt;...&gt;&gt;&gt;）
+    const int nStep = gridDim.x * blockDim.x; // 线程总数 = N，组数 = N/2 → 多数线程空转一圈
+    T temp = 0.0;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x; 
+    while (gid &lt; n / pack_size) { // 只遍历组；n 为奇数时会漏掉末尾元素（见文件头&quot;长度对齐&quot;）
+        for (int i = 0; i &lt; pack_size; i++) { // 【一组 2 个元素都乘进来】a[gid].elem[i] 就是原来第 2*gid+i 个 half
+            temp = temp + a[gid].elem[i] * b[gid].elem[i];
+        }
+        gid += nStep;
+    }
+    AtomicAdd&lt;T, pack_size&gt;(c, temp); // 【每个线程一次 half2 原子加】后一半线程在这里加了个 0，次数与 v0 持平
+}
+
+int main(){ // 【输入 a 块】分配仍是 N 个 half，视图换成 Pack&lt;half,2&gt;*
+    half *x_host = (half*)malloc(N*sizeof(half));
+    half *x_device;
+    cudaMalloc((void **)&amp;x_device, N*sizeof(half)); // cudaMalloc 的对齐足够放 half2
+    for (int i = 0; i &lt; N; i++) x_host[i] = 0.1;
+    cudaMemcpy(x_device, x_host, N*sizeof(half), cudaMemcpyHostToDevice);
+    Pack&lt;half, 2&gt;* x_pack = reinterpret_cast&lt;Pack&lt;half, 2&gt;*&gt;(x_device); // 同一段内存，换类型看
+
+    // ---------- 输入 b：同上 ----------
+    half *y_host = (half*)malloc(N*sizeof(half));
+    half *y_device;
+    cudaMalloc((void **)&amp;y_device, N*sizeof(half));
+    for (int i = 0; i &lt; N; i++) y_host[i] = 0.1;
+    cudaMemcpy(y_device, y_host, N*sizeof(half), cudaMemcpyHostToDevice);
+    Pack&lt;half, 2&gt;* y_pack = reinterpret_cast&lt;Pack&lt;half, 2&gt;*&gt;(y_device);
+
+    // ---------- 输出 c：必须开 2 个 half ----------
+    //   一次 half2 原子加写 4 字节；只分配 2 字节会越界（v0 与这里的区别）。
+    half *output_host = (half*)malloc(2 * sizeof(half));
+    half *output_device;
+    cudaMalloc((void **)&amp;output_device, 2 * sizeof(half));
+    cudaMemset(output_device, 0, sizeof(half) * 2); // 两个 lane 都清 0
+    Pack&lt;half, 2&gt;* output_pack = reinterpret_cast&lt;Pack&lt;half, 2&gt;*&gt;(output_device);
+
+    // 【网格配置与 v0 逐字相同】线程数= N 保持不变，才谈得上&quot;只改原子加方式&quot;的对比。
+    int32_t block_num = (N + kBlockSize - 1) / kBlockSize;
+    dim3 grid(block_num, 1);
+    dim3 block(kBlockSize, 1);
+    dot&lt;half, 2&gt;&lt;&lt;&lt;grid, block&gt;&gt;&gt;(x_pack, y_pack, output_pack, N); // 实参对形参：a←x_pack、b←y_pack、c←output_pack（1 组=4 字节）、n←N（half 总数）
+    cudaMemcpy(output_host, output_device, 2 * sizeof(half), cudaMemcpyDeviceToHost);
+    printf(&quot;%.6f\n&quot;, static_cast&lt;double&gt;(output_host[0])); // 【打印 x lane】实测 64.000000：增量 ~0.02，涨到 64 后 ulp=0.0625，加法被舍回原值（见 ../v0/ 文件头&quot;坑 2&quot;）
+    free(x_host);
+    free(y_host);
+    free(output_host);
+    cudaFree(x_device);
+    cudaFree(y_device);
+    cudaFree(output_device);
+}</code></pre>
+              </figure>
+              <figure class="code-block">
+                <figcaption><span>v2 / fast_atomic_add_half.cu · 全文 101 行</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>#include &lt;cuda.h&gt;
+#include &lt;cuda_runtime.h&gt;
+#include &lt;time.h&gt;
+#include &lt;algorithm&gt;
+#include &lt;iostream&gt;
+#include &lt;cstdint&gt;
+#include &lt;cuda_fp16.h&gt;
+using namespace std;
+#define N 32*1024*1024
+#define kBlockSize 256
+
+
+// FastAdd is referenced from
+// https://github.com/pytorch/pytorch/blob/396c3b1d88d7624938a2bb0b287f2a19f1e89bb4/aten/src/ATen/native/cuda/KernelUtils.cuh#L29
+template&lt;typename T, typename std::enable_if&lt;std::is_same&lt;half, T&gt;::value&gt;::type* = nullptr&gt;
+__device__ __forceinline__ void FastSpecializedAtomicAdd(T* base, size_t offset,
+                                                         const size_t length, T value) {
+#if ((defined(CUDA_VERSION) &amp;&amp; (CUDA_VERSION &lt; 10000)) \
+     || (defined(__CUDA_ARCH__) &amp;&amp; (__CUDA_ARCH__ &lt; 700)))
+  atomicAdd(reinterpret_cast&lt;half*&gt;(base) + offset, static_cast&lt;half&gt;(value));
+#else
+  // Accounts for the chance base falls on an odd 16 bit alignment (ie, not 32 bit aligned)
+  __half* target_addr = reinterpret_cast&lt;__half*&gt;(base + offset);
+  bool low_byte = (reinterpret_cast&lt;std::uintptr_t&gt;(target_addr) % sizeof(__half2) == 0);
+
+  if (low_byte &amp;&amp; offset &lt; (length - 1)) {
+    __half2 value2;
+    value2.x = value;
+    value2.y = __float2half_rz(0);
+    atomicAdd(reinterpret_cast&lt;__half2*&gt;(target_addr), value2);
+
+  } else if (!low_byte &amp;&amp; offset &gt; 0) {
+    __half2 value2;
+    value2.x = __float2half_rz(0);
+    value2.y = value;
+    atomicAdd(reinterpret_cast&lt;__half2*&gt;(target_addr - 1), value2);
+
+  } else {
+    atomicAdd(reinterpret_cast&lt;__half*&gt;(base) + offset, static_cast&lt;__half&gt;(value));
+  }
+#endif
+}
+
+template&lt;typename T, typename std::enable_if&lt;!std::is_same&lt;half, T&gt;::value&gt;::type* = nullptr&gt;
+__device__ __forceinline__ void FastSpecializedAtomicAdd(T* base, size_t offset,
+                                                         const size_t length, T value) {
+  atomicAdd(base + offset, value);
+}
+
+template&lt;class T&gt;
+__device__ __forceinline__ void FastAdd(T* base, size_t offset, const size_t length, T value) {
+  FastSpecializedAtomicAdd(base, offset, length, value);
+}
+
+
+// vector inner product
+
+__global__ void dot(half* a, half* b, half* c, int n){
+    const int nStep = gridDim.x * blockDim.x;
+    half temp = 0.0;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    while (gid &lt; n) {
+        temp = temp + a[gid] * b[gid];
+        gid += nStep;
+    }
+    // atomicAdd(c, temp);
+    FastAdd(c, 0, 2, temp);
+}
+
+int main(){
+    half *x_host = (half*)malloc(N*sizeof(half));
+    half *x_device;
+    cudaMalloc((void **)&amp;x_device, N*sizeof(half));
+    for (int i = 0; i &lt; N; i++) x_host[i] = 0.1;
+    cudaMemcpy(x_device, x_host, N*sizeof(half), cudaMemcpyHostToDevice);
+
+    half *y_host = (half*)malloc(N*sizeof(half));
+    half *y_device;
+    cudaMalloc((void **)&amp;y_device, N*sizeof(half));
+    for (int i = 0; i &lt; N; i++) y_host[i] = 0.1;
+    cudaMemcpy(y_device, y_host, N*sizeof(half), cudaMemcpyHostToDevice);
+
+    half *output_host = (half*)malloc(sizeof(half) * 2);
+    half *output_device;
+    cudaMalloc((void **)&amp;output_device, sizeof(half) * 2);
+    cudaMemset(output_device, 0, sizeof(half) * 2);
+
+    int32_t block_num = (N + kBlockSize - 1) / kBlockSize;
+    dim3 grid(block_num, 1);
+    dim3 block(kBlockSize, 1);
+    dot&lt;&lt;&lt;grid, block&gt;&gt;&gt;(x_device, y_device, output_device, N);
+    cudaMemcpy(output_host, output_device, sizeof(half) * 2, cudaMemcpyDeviceToHost);
+    printf(&quot;%.6f\n&quot;, static_cast&lt;double&gt;(output_host[0]));
+    free(x_host);
+    free(y_host);
+    free(output_host);
+    cudaFree(x_device);
+    cudaFree(y_device);
+    cudaFree(output_device);
+}
+</code></pre>
+              </figure>
+              <div class="callout"><span class="callout-title">三份 main 都没有计时代码</span><p>v0 的文件头里写得很直白：<code>#include &lt;time.h&gt;</code> 其实没用到，“main 里没有计时代码，耗时靠 ncu 外部测”。本文表格里的毫秒数是另加 <code>cudaEvent</code> 测的。</p><p>另外三份 <code>main</code> 都只 <code>printf</code> 出结果值，<strong>不与任何参考值比对</strong>——因为它们自己也知道结果是 32 而不是真值。</p></div>
+            </section>
+            <section id="perf">
+              <p class="section-label">CHAPTER 04</p>
+              <h3>实测性能对比分析</h3>
+              <p>规模 <code>N = 33,554,432</code>，线程数 = N，每个线程发一条原子指令，全部指向同一个地址。跑 7 次、取后 5 次最小值。这个负载的耗时完全由原子通路决定，带宽指标没有意义，所以下面换算成<strong>“每一次原子操作花了多少纳秒”</strong>来比较。</p>
+<h4>本机实测（RTX 5070）</h4>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>版本</th><th>做法</th><th>原子宽度</th><th class="num">耗时 (ms)</th><th class="num">每次原子 (ns)</th><th class="num">相对 v0</th><th class="num">打印值</th></tr></thead>
+                  <tbody>
+                  <tr><td>v0</td><td>half 原子加基线</td><td>2 字节</td><td class="num">48.074</td><td class="num">1.43</td><td class="num">1.00×</td><td class="num">32.0</td></tr>
+                  <tr class="is-best"><td>v1</td><td>手写 pack 成 half2</td><td>4 字节</td><td class="num">39.457</td><td class="num">1.18</td><td class="num"><strong>1.22×</strong></td><td class="num">64.0</td></tr>
+                  <tr class="is-best"><td>v2</td><td>fastAtomicAdd 运行期对齐</td><td>4 字节</td><td class="num">39.456</td><td class="num">1.18</td><td class="num"><strong>1.22×</strong></td><td class="num">32.0</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>三点观察。</p>
+              <p><strong>第一，v1 和 v2 的耗时几乎一模一样（39.457 vs 39.456 ms）。</strong>这符合预期：两者最终的原子指令完全相同（4 字节 <code>atom.add.noftz.f16x2</code>），指令条数也相同，只是“怎么凑齐这 4 字节”的路径不同——v1 靠改数据布局，v2 靠运行期判断。两条路径的<strong>结果</strong>一致，所以性能一致。</p>
+              <p><strong>第二，宽度翻倍只换来 1.22 倍，远不是 2 倍。</strong>如果原子通路的成本纯粹由字节数决定，2 字节变 4 字节应该接近 2 倍。实际只有 1.22 倍，说明这条通路上还有相当一部分成本是<strong>与宽度无关的固定开销</strong>——同地址操作排队、L2 往返延迟、指令发射。</p>
+              <p><strong>第三，v2 的打印值 32 和 v1 的 64 不同，但这不是性能差异。</strong>v1 每次原子加贡献的是两个乘积之和（0.02），v2 因为走分支 1，只有本槽真正加到了 0.01、右邻居加的是 0——所以 v2 的累加速率与 v0 相同，冻结点也就和 v0 一样落在 32。这个差异纯粹是第 ① 段那个 half 精度问题的表现。</p>
+<h4>和 A100 上的数据对照</h4>
+              <p>仓库 README 里原作者在 A100-PCIE-40GB 上用 ncu 测的同一组实验：</p>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>版本</th><th class="num">原子宽度</th><th class="num">A100 耗时 (ms)</th><th class="num">A100 每次原子 (ns)</th><th class="num">A100 相对 v0</th></tr></thead>
+                  <tbody>
+                  <tr><td>v0</td><td class="num">2 字节</td><td class="num">422.36</td><td class="num">12.59</td><td class="num">1.00×</td></tr>
+                  <tr class="is-best"><td>v1</td><td class="num">4 字节</td><td class="num">137.02</td><td class="num">4.08</td><td class="num"><strong>3.08×</strong></td></tr>
+                  <tr class="is-best"><td>v2</td><td class="num">4 字节</td><td class="num">137.01</td><td class="num">4.08</td><td class="num"><strong>3.08×</strong></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>把两张表对齐看，反差非常明显：</p>
+              <div class="formula">                 v0 每次原子      v1/v2 每次原子     加速比
+A100 (1555 GB/s)    12.59 ns          4.08 ns          3.08×
+RTX 5070 (672 GB/s)  1.43 ns          1.18 ns          1.22×
+
+绝对速度：本机 v0 就比 A100 的 v0 快 8.8 倍</div>
+              <p>两个原因。<strong>一是 Blackwell 这一代对原子操作的硬件支持强得多</strong>——A100 是 Ampere，同地址原子操作的排队成本在它上面要重得多；本机 v0 的 1.43 ns/次，已经接近“L2 往返延迟被大量并发掩盖掉”之后的理论下限了。</p>
+              <p><strong>二是“可优化的空间”本来就不一样。</strong>A100 上 2 字节原子操作的代价是 4 字节的 3 倍，说明那条通路在窄宽度下效率损失极大；本机只差 1.22 倍，说明 2 字节操作在这个架构上损失小得多。收益的上限由“基线有多差”决定，而不是由优化手法有多妙决定——这一点在 elementwise 那篇里也出现过同样的规律。</p>
+              <div class="callout"><span class="callout-title">怎么读这张表</span><p>如果只看 A100 的表，很容易得出“把 half 原子加打包成 half2 能提速 3 倍”这个结论，然后在别的卡上照做、发现只有 1.22 倍而怀疑自己写错了。两张表放在一起才能看出：<strong>3.08× 和 1.22× 都不是代码的性质，是代码与硬件配对的结果。</strong></p></div>
+            </section>
+            <section id="summary">
+              <p class="section-label">CHAPTER 05</p>
+              <h3>小结</h3>
+              <p>这三个版本把“凑宽度”这个思路的两条不同路径摆在一起，很值得对照：</p>
+<div class="callout"><span class="callout-title">两种凑宽度的思路</span><p><strong>v1 改数据结构</strong>：把数组重新解释成 <code>Pack&lt;half,2&gt;*</code>，让相邻两个 half 天然待在同一个 4 字节槽里。代价是<em>对调用方提出要求</em>——长度必须偶数、地址必须 4 字节对齐。做法简单，但不通用。</p><p><strong>v2 该调用点</strong>：数据布局一点不动，只在实际发起原子操作时判断对齐，能凑成就借邻居的格子（给它加 0，不改变它的值），凑不成退回 2 字节。代价是<em>每次多几条判断指令</em>，换来的是任意长度、任意地址都能用——所以它能被抽成通用库函数（PyTorch 就是这么用的）。</p><p>两者的<strong>最终原子指令完全相同</strong>，实测耗时也几乎相同（39.457 vs 39.456 ms）。差别只在于“这份复杂度由谁来承担”。</p></div>
+              <p>另外一个更基础的收获是关于<strong>基线</strong>的：同一份优化，在 A100 上值 3.08 倍，在本机值 1.22 倍。原因不是代码变差了，而是本机的 2 字节原子加本来就不那么差。这和前面 elementwise（A100 上 1.69× / 本机 1.06×）、reduce（A100 上 9.94× / 本机 2.20×）是同一个规律：</p>
+<div class="callout"><span class="callout-title">跨卡照搬优化手法的风险</span><p>看到一个 3 倍的优化案例，先问一句：<strong>它的基线为什么那么慢？</strong></p><p>如果基线慢是因为硬件本身的短板（A100 的窄原子通路、A100 上 2 字节访存喂不饱 1555 GB/s），那换一张没有这个短板的卡，收益就会大幅缩水——甚至像 reduce 的 v1 那样变成负收益。</p><p>反过来，真正可移植的是<strong>“先定位瓶颈，再决定要不要动手”</strong>这个方法本身。</p></div>
+              <p>这一篇也是五篇里的最后一篇。五个算子走下来，带宽受限（reduce、elementwise、upsample、gemv）和原子竞争（本篇）这两类问题各占一半，而每一类的优化空间都高度依赖目标硬件——这大概是这组实测里最一致的一条结论。</p>
+              <p><a class="inline-link" href="./">← 返回 CUDA 算子优化目录</a></p>
+            </section>
+            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>05 / READING</span></div>
+    </div>
+  </body>
+</html>

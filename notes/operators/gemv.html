@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUDA GEMV 矩阵向量乘精读：v0/v1/v2 三个版本如何按行划分 warp、如何用 float4 向量化，附 RTX 5070 实测与 cuBLAS 对比。">
+    <meta name="theme-color" content="#101113">
+    <title>GEMV 矩阵向量乘 · warp 一行与向量化访存 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a><a href="../../ai-infra/">AI Infra</a><a href="../../projects/">GitHub 项目</a><a href="../../resources/">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>GEMV 矩阵向量乘</nav>
+        <div class="reader-heading">
+          <p class="eyebrow">AI INFRA / OPERATORS / 04</p>
+          <h1>GEMV 矩阵向量乘</h1>
+          <p>y = A·x，算术强度只有 0.5 FLOP/字节，是典型的带宽受限算子。三个版本分别解决骨架、指令数、短行并行度——而实测显示前两个在这张卡上都没生效。</p>
+        </div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>章节目录</summary>
+              <nav aria-label="本文章节目录">
+                <ol class="chapter-list">
+                  <li><a href="#what"><small>00</small> 算子在做什么</a></li>
+                  <li><a href="#walk"><small>01</small> 代码逐段解析</a></li>
+                  <li><a href="#full"><small>02</small> 完整代码</a></li>
+                  <li><a href="#perf"><small>03</small> 实测性能对比</a></li>
+                  <li><a href="#summary"><small>04</small> 小结</a></li>
+                </ol>
+              </nav>
+            </details>
+          </aside>
+          <article class="reader-content">
+            <span class="article-state">实测环境 · RTX 5070 / sm_120 / CUDA 13.4</span>
+            <section id="what">
+              <p class="section-label">CHAPTER 01</p>
+              <h3>算子在做什么，先看一个算例</h3>
+              <p>GEMV 就是矩阵乘向量：<code>y = A · x</code>。矩阵 A 是 M×N，每一行和向量 x 做点积，得到输出 y 的一个分量。</p>
+              <div class="formula">y = A · x            A: M×N（行主序）   x: 长度 N   y: 长度 M
+
+逐元素展开：
+  y[i] = Σ(j = 0 .. N-1)  A[i][j] * x[j]          i ∈ [0, M)
+
+也就是 M 次独立的点积，每次长度为 N。</div>
+              <p>为什么单独关心它：大模型推理的<strong>解码阶段</strong>每生成一个 token 都要做一次 GEMV——此时 batch 很小（常常是 1），矩阵乘退化成矩阵乘向量。这是推理延迟里最典型的形态，也是各家推理框架反复优化的一类 kernel。</p>
+              <p>它有一个很鲜明的性格：<strong>算术强度极低</strong>。看 M=N=4096 的情况：</p>
+<h4>先算一下它到底受什么限制</h4>
+              <div class="formula">要读的数据：A 占 4096 × 4096 × 4 B = 64 MiB
+            x 占 4096 × 4 B         = 16 KiB
+            y 占 4096 × 4 B         = 16 KiB
+            ────────────────────────────────────
+            合计约 67.1 MB
+
+要算的运算：4096 × 4096 = 16.7 M 次乘加 = 33.5 MFLOP
+
+算术强度 = 33.5e6 FLOP ÷ 67.1e6 字节 ≈ 0.5 FLOP/字节
+
+RTX 5070 的平衡点 ≈ 算力 ÷ 带宽（远大于 0.5）
+结论：纯 memory-bound —— 每搬 4 个字节只换来 1 次乘加，计算完全藏不住访存。</div>
+              <p>这就是为什么 GEMV 的优化手法和 reduce 是同一类：<strong>把访存做宽、做合并</strong>，而不是减少计算。理想情况下，这个问题的耗时下限就是“把 67.1 MB 从显存读进来”的时间：</p>
+              <div class="formula">理想耗时 = 67.1e6 字节 ÷ 672 GB/s ≈ 100 µs        （RTX 5070 理论峰值）
+本轮最好的实测是 108.8 µs，也就是峰值的 91.8%。</div>
+<h4>一个可以手工核对的算例</h4>
+              <p>取 M=3、N=4 的小例子，A 按行主序存放：</p>
+              <div class="formula">A = [ 1  2  3  4 ]          x = [ 2 ]
+    [ 5  6  7  8 ]              [ 1 ]
+    [ 9 10 11 12 ]              [ 0 ]
+                                [ 3 ]
+
+y[0] = 1*2 + 2*1 + 3*0 + 4*3  = 2 + 2 + 0 + 12 = 16
+y[1] = 5*2 + 6*1 + 7*0 + 8*3  = 10 + 6 + 0 + 24 = 40
+y[2] = 9*2 + 10*1 + 11*0 + 12*3 = 18 + 10 + 0 + 36 = 64
+
+y = [16, 40, 64]</div>
+              <p>每个 y 分量都要把 A 的一整行走一遍。这里就出现了本文的核心问题：<strong>一行有 N 个数，一个线程读不完也等不起</strong>。三个版本的差别，全都发生在“这一行谁来读、怎么读”上。</p>
+<h4>为什么用 warp 而不是 block 来做一行</h4>
+              <p>最自然的想法是“一个 block 负责一行”——但那样每行算完都要在 shared memory 里跨 warp 归约、加栅栏、再写回，开销不小，而 GEMV 的行之间又完全独立、没有复用（x 会被所有行共用，但行与行之间没有数据交换）。</p>
+              <p>这份实现选的是<strong>一个 warp 承包一行</strong>：32 个线程分头读这一行的 32 个元素、各自乘上对应的 x、然后靠寄存器内的 <code>__shfl_down_sync</code> 归约成一个值。全程不需要 shared memory、不需要栅栏。代价是每行只用上了 32 个线程，对长行来说并行度偏低——这正是 v1、v2 各自想解决的问题。</p>
+            </section>
+            <section id="walk">
+              <p class="section-label">CHAPTER 02</p>
+              <h3>代码逐段解析</h3>
+              <p>三个版本共用同一段归约代码，也共用同一套“一个 warp 一行”的骨架，差别只在<strong>每个 lane 手里的 <code>res</code> 是怎么算出来的</strong>。这一点很关键——看懂了就能明白三个版本的优化目标完全不同。</p>
+<h4>① 共用地基：warpReduceSum</h4>
+              <figure class="code-block">
+                <figcaption><span>sgemv_v1.cu : 23-31 · 三个版本一字未改</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>template &lt;unsigned int WarpSize&gt;
+__device__ __forceinline__ float warpReduceSum(float sum) {
+    if (WarpSize &gt;= 32)sum += __shfl_down_sync(0xffffffff, sum, 16); // 0-16, 1-17, 2-18, etc.
+    if (WarpSize &gt;= 16)sum += __shfl_down_sync(0xffffffff, sum, 8);// 0-8, 1-9, 2-10, etc.
+    if (WarpSize &gt;= 8)sum += __shfl_down_sync(0xffffffff, sum, 4);// 0-4, 1-5, 2-6, etc.
+    if (WarpSize &gt;= 4)sum += __shfl_down_sync(0xffffffff, sum, 2);// 0-2, 1-3, 4-6, 5-7, etc.
+    if (WarpSize &gt;= 2)sum += __shfl_down_sync(0xffffffff, sum, 1);// 0-1, 2-3, 4-5, etc.
+    return sum;
+}</code></pre>
+              </figure>
+              <p>五行取值、五步归约。模板参数 <code>WarpSize</code> <strong>不是</strong>传给 shuffle 的 <code>width</code>（那份掩码一直是默认的 32），它只控制“从哪个 delta 起步”：</p>
+              <div class="formula">warpReduceSum&lt;32&gt;  →  跑 delta = 16, 8, 4, 2, 1   共 5 步，收 32 个 lane
+warpReduceSum&lt;16&gt;  →  跑 delta =     8, 4, 2, 1   共 4 步，收 16 个 lane
+                       （最贵的 delta=16 那一步在编译期被剪掉了）</div>
+              <p>这个模板参数在 v0、v1 里都传 32，只有 v2 传 16——因为 v2 把 warp 劈成了两半。</p>
+              <div class="callout"><span class="callout-title">__shfl_down_sync 的一个坑</span><p>当“源 lane”（自己下标 + delta）越界时，PTX 的语义是<strong>取自己的输入值</strong>，而不是保持不变。落到 <code>sum += __shfl_down_sync(...)</code> 上就等价于 <code>sum += sum</code>——<strong>值直接翻倍</strong>。这就是为什么陪跑的 lane 数值会越滚越大。lane 0 不受影响，因为它的依赖链 16→8→4→2→1 全程都不越界。所以这段代码的结果是对的，但除了 lane 0 之外，其他 lane 的值没有意义，不能拿去用。</p></div>
+<h4>② v0：一个 warp 一行，标量读</h4>
+              <figure class="code-block">
+                <figcaption><span>sgemv_v0.cu : 35-65 · kernel 全文</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// if N == 32
+__global__ void Sgemv_v0( 
+    float * __restrict__ A,
+    float * __restrict__ x,
+    float * __restrict__ y, 
+    const int M,
+    const int N) {
+    // Block index
+    int bx = blockIdx.x;
+
+    // Thread index
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    const int warp_size=32;
+    int laneId= tx % warp_size;
+    int current_row = blockDim.y * bx + ty;
+
+    if(current_row &lt; M){
+        float res=0;
+        int kIteration = N/warp_size;
+        if(kIteration==0) kIteration=1;
+        #pragma unroll
+        for(int i=0; i&lt; kIteration; i++){
+            int current_col = i*warp_size + laneId;
+            res += A[current_row*N + current_col] * x[current_col];
+        }
+        res = warpReduceSum&lt;warp_size&gt;(res);
+        if(laneId==0) y[current_row]=res;
+    }
+}</code></pre>
+              </figure>
+              <div class="formula">线程组织：dimBlock(32, 4)  →  一个 block 里有 4 个 warp = 4 行
+           dimGrid(M/4)     →  共 M/4 个 block
+
+laneId       = tx % 32                     本 lane 在 warp 内的编号
+current_row  = blockDim.y * bx + ty        本 warp 负责的行号
+
+循环 N/32 轮，第 i 轮：
+  current_col = i*32 + laneId
+  res += A[current_row*N + current_col] * x[current_col]</div>
+              <p>访存是最理想的情形：同一轮里 32 个 lane 读的 <code>A</code> 地址是<code>row*N + i*32 + laneId</code>——<strong>lane 之间连续</strong>，合起来正好 32 × 4 = 128 字节，一个完整事务。x 的访问也同理。所以 v0 的合并度天然是满的，没有任何访存浪费。</p>
+              <p>它的限制写在文件顶部那行注释里：<code>// if N == 32</code>。但代码实际上写的是 <code>kIteration = N/warp_size; if(kIteration==0) kIteration=1;</code>——只要 N 是 32 的倍数就能跑，注释和代码口径并不一致。真正硬的要求是 <strong>N ≥ 32</strong>：N 小于 32 时 <code>kIteration</code> 会被兜底成 1，于是 lane 会去读第 0~31 列，而这一行根本没有那么多列——越界。</p>
+<h4>③ v1：把标量读换成 float4</h4>
+              <figure class="code-block">
+                <figcaption><span>sgemv_v1.cu : 33-69 · kernel 全文</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// if N&gt;= 128
+__global__ void Sgemv_v1( 
+    float * __restrict__ A,
+    float * __restrict__ x,
+    float * __restrict__ y, 
+    const int M,
+    const int N) {
+    // Block index
+    int bx = blockIdx.x;
+
+    // Thread index
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    const int warp_size=32;
+    int laneId= tx % warp_size;
+    int current_row = blockDim.y * bx + ty;
+
+    if(current_row &lt; M){
+        float res=0;
+        int kIteration = (N/warp_size)/4;
+        if(kIteration==0) kIteration=1;
+        A = &amp;A[current_row*N];
+        #pragma unroll
+        for(int i=0; i&lt; kIteration; i++){
+            int current_col_vec = (i*warp_size + laneId);
+            float4 current_val= reinterpret_cast&lt;float4 *&gt;(A)[current_col_vec];
+            float4 current_x = reinterpret_cast&lt;float4 *&gt;(x)[current_col_vec];
+            res += current_val.x*current_x.x;
+            res += current_val.y*current_x.y;
+            res += current_val.z*current_x.z;
+            res += current_val.w*current_x.w;
+        }
+        res = warpReduceSum&lt;warp_size&gt;(res);
+        if(laneId==0) y[current_row]=res;
+    }
+}</code></pre>
+              </figure>
+              <p>v0 每轮每 lane 读 4 字节，一个 warp 一轮一共搬 128 字节。v1 把 <code>float4</code>（16 字节）搬进来，一个 lane 一轮读 4 个 float，于是循环轮数从 <code>N/32</code> 降到 <code>(N/32)/4 = N/128</code>——<strong>访存指令数直接除以 4</strong>，每线程在飞的字节数乘以 4。</p>
+              <div class="formula">v0：循环 N/32 轮，每轮每 lane 1 条 4 字节读
+v1：循环 N/128 轮，每轮每 lane 1 条 16 字节读（float4）
+
+合并度不变（lane 之间仍然连续），变的只是指令条数。
+一行 4 个分量的乘加在寄存器里展开：
+  res += current_val.x * current_x.x;
+  res += current_val.y * current_x.y;      ← 这 4 条会进流水线重叠，
+  res += current_val.z * current_x.z;         不会变成一条 4 步的依赖链
+  res += current_val.w * current_x.w;</div>
+              <p>最容易算错的地方是 <code>reinterpret_cast&lt;float4*&gt;(A)[current_col_vec]</code> 的下标语义：<code>current_col_vec</code> 是 <strong>float4 的下标</strong>，不是 float 的下标。<code>A = &amp;A[current_row*N]</code> 先把指针挪到本行行首（这一步是 float 下标），之后再按 float4 索引。第 c 个 float4 覆盖的正是第 4c ~ 4c+3 个 float。</p>
+              <p>硬约束：<code>N % 128 == 0</code> 且 <code>N ≥ 128</code>（要保证 <code>(N/32)/4 ≥ 1</code>）。摊销下来每个 lane 的归约成本没变，但装载阶段的指令数少了四分之三。</p>
+<h4>④ v2：一个 warp 同时管两行</h4>
+              <figure class="code-block">
+                <figcaption><span>sgemv_v2.cu : 34-64 · kernel 全文</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>template &lt;
+    const int ROW_PER_WARP
+    &gt; 
+__global__ void Sgemv_v2( 
+    float * __restrict__ A,
+    float * __restrict__ x,
+    float * __restrict__ y, 
+    const int M,
+    const int N) {
+    // Block index
+    int bx = blockIdx.x;
+
+    // Thread index
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    const int warp_size=32;
+    int laneId= tx % warp_size;
+    int current_warp_row = (blockDim.y * bx + ty) * ROW_PER_WARP;
+    const int kWarp_size = warp_size / ROW_PER_WARP;
+    int kLaneId = laneId % kWarp_size;
+    int current_thread_row = current_warp_row + laneId / kWarp_size;
+
+    if(current_thread_row &lt; M){
+        float res=0;
+        int current_col = kLaneId;
+        res += A[current_thread_row * N + current_col] * x[current_col];
+        res = warpReduceSum&lt;kWarp_size&gt;(res);
+        if(kLaneId==0) y[current_thread_row]=res;
+    }
+}</code></pre>
+              </figure>
+              <p>这一版换了思路。前面两版都是“一行用满 32 个 lane”，但如果 N 很小——比如 N=16，一行只有 16 个数——32 个 lane 里就有 16 个是闲着的，并行度浪费一半。</p>
+              <p>v2 把 warp 从中间劈成两半：<code>ROW_PER_WARP = 2</code>，0~15 号 lane 管一行、16~31 号 lane 管另一行。</p>
+              <div class="formula">kWarp_size = 32 / ROW_PER_WARP = 16      每个半区 16 个 lane
+kLaneId    = laneId % 16                本 lane 在半个 warp 内的编号
+current_thread_row = current_warp_row + laneId / 16    属于哪一行
+
+res = A[current_thread_row * N + kLaneId] * x[kLaneId]    ← 回归标量读
+res = warpReduceSum&lt;kWarp_size&gt;(res)                       ← 传 16，剪掉 delta=16 那步
+if (kLaneId == 0) y[current_thread_row] = res              ← 每个半区的 0 号 lane 各写一行</div>
+              <p>两个变化值得注意。<strong>归约宽度从 32 降到 16</strong>：<code>warpReduceSum&lt;16&gt;</code> 跳过最贵的 <code>delta=16</code> 那一步，5 步变 4 步。<strong>装载回到标量</strong>：一行只有 16 个数，再上 float4 是没有意义的（<code>float4</code> 一次就要 4 个，16 个元素只够 4 条指令），所以 v2 用回了最简单的逐元素读。</p>
+              <p>它的适用范围注释写的是 <code>// if N &lt;= 16</code>，但更准确的说法是 <strong>N 必须恰好等于 16</strong>：N 更小时应上面还有空闲 lane，N 更大时一行覆盖不全。这也是 v2 没有成为通用版本的原因——它专门为“行特别短”的场景设计。</p>
+              <div class="callout"><span class="callout-title">三个版本其实在解三个不同的问题</span><p><strong>v0</strong> 解决“怎么让一个 warp 协作算出一行”（骨架正确、访存合并）——这是地基。</p><p><strong>v1</strong> 解决“装载指令太多”（N 大、行长的场景）。</p><p><strong>v2</strong> 解决“一行太短、lane 闲着”（N 小的场景）。</p><p>换行长度就要换版本，这也是 GEMV 这个算子有意思的地方：它的最优实现取决于形状，没有一个版本能通吃。</p></div>
+            </section>
+            <section id="full">
+              <p class="section-label">CHAPTER 03</p>
+              <h3>完整代码</h3>
+              <p>下面贴出 <code>v1/sgemv_v1.cu</code> 全文（159 行）。选 v1 而不是目录里的最后一个 v2，是因为 v1 针对的是“N 较大”这个实际推理场景的常态，而 v2 只在 N 恰好等于 16 时才能用。</p>
+              <figure class="code-block is-long">
+                <figcaption><span>sgemv_v1.cu · 全文 159 行</span><span class="code-lang">CUDA C++</span></figcaption>
+                <pre><code>// Copy from https://github.com/Liu-xiandong/How_to_optimize_in_GPU/blob/master/sgemv/Sgemv_v1.cu
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+// CUDA runtime
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cublas_v2.h&gt;
+#include &lt;math.h&gt; 
+
+// cal offset from row col and ld , in row-major matrix, ld is the width of the matrix
+#define OFFSET(row, col, ld) ((row) * (ld) + (col))
+
+// transfer float4
+#define FETCH_FLOAT4(pointer) (reinterpret_cast&lt;float4*&gt;(&amp;(pointer))[0])
+
+#define checkCudaErrors(func)				\
+{									\
+    cudaError_t e = (func);			\
+    if(e != cudaSuccess)						                \
+        printf (&quot;%s %d CUDA: %s\n&quot;, __FILE__,  __LINE__, cudaGetErrorString(e));		\
+}
+
+template &lt;unsigned int WarpSize&gt;
+__device__ __forceinline__ float warpReduceSum(float sum) {
+    if (WarpSize &gt;= 32)sum += __shfl_down_sync(0xffffffff, sum, 16); // 0-16, 1-17, 2-18, etc.
+    if (WarpSize &gt;= 16)sum += __shfl_down_sync(0xffffffff, sum, 8);// 0-8, 1-9, 2-10, etc.
+    if (WarpSize &gt;= 8)sum += __shfl_down_sync(0xffffffff, sum, 4);// 0-4, 1-5, 2-6, etc.
+    if (WarpSize &gt;= 4)sum += __shfl_down_sync(0xffffffff, sum, 2);// 0-2, 1-3, 4-6, 5-7, etc.
+    if (WarpSize &gt;= 2)sum += __shfl_down_sync(0xffffffff, sum, 1);// 0-1, 2-3, 4-5, etc.
+    return sum;
+}
+
+// if N&gt;= 128
+__global__ void Sgemv_v1( 
+    float * __restrict__ A,
+    float * __restrict__ x,
+    float * __restrict__ y, 
+    const int M,
+    const int N) {
+    // Block index
+    int bx = blockIdx.x;
+
+    // Thread index
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+
+    const int warp_size=32;
+    int laneId= tx % warp_size;
+    int current_row = blockDim.y * bx + ty;
+
+    if(current_row &lt; M){
+        float res=0;
+        int kIteration = (N/warp_size)/4;
+        if(kIteration==0) kIteration=1;
+        A = &amp;A[current_row*N];
+        #pragma unroll
+        for(int i=0; i&lt; kIteration; i++){
+            int current_col_vec = (i*warp_size + laneId);
+            float4 current_val= reinterpret_cast&lt;float4 *&gt;(A)[current_col_vec];
+            float4 current_x = reinterpret_cast&lt;float4 *&gt;(x)[current_col_vec];
+            res += current_val.x*current_x.x;
+            res += current_val.y*current_x.y;
+            res += current_val.z*current_x.z;
+            res += current_val.w*current_x.w;
+        }
+        res = warpReduceSum&lt;warp_size&gt;(res);
+        if(laneId==0) y[current_row]=res;
+    }
+}
+
+int main(int argc, char** argv) {
+    if (argc != 3) {
+        printf(&quot;usage: ./main [M] [N]\n&quot;);
+        exit(0);
+    }
+    size_t M = atoi(argv[1]);
+    size_t N = atoi(argv[2]);
+
+    size_t bytes_A = sizeof(float) * M * N;
+    size_t bytes_x = sizeof(float) * N;
+    size_t bytes_y = sizeof(float) * M;
+    float* h_A = (float*)malloc(bytes_A);
+    float* h_x = (float*)malloc(bytes_x);
+    float* h_y = (float*)malloc(bytes_y);
+    float* h_y1 = (float*)malloc(bytes_y);
+
+    float* d_A;
+    float* d_x;
+    float* d_y;
+
+    checkCudaErrors(cudaMalloc(&amp;d_A, bytes_A));
+    checkCudaErrors(cudaMalloc(&amp;d_x, bytes_x));
+    checkCudaErrors(cudaMalloc(&amp;d_y, bytes_y));
+
+    // 生成A的数据
+    for( int i = 0; i &lt; M * N; i++ ) {
+        h_A[i] = (float)i/N;
+    }
+
+    // 生成x的数据
+    for( int i = 0; i &lt; N; i++ ) {
+        h_x[i] = 1;
+    }
+    memset(h_y,0,M*sizeof(float));
+    memset(h_y1,0,M*sizeof(float));
+
+    int nIter = 1000;
+    checkCudaErrors(cudaMemcpy( d_A, h_A, bytes_A, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy( d_x, h_x, bytes_x, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy( d_y, h_y, bytes_y, cudaMemcpyHostToDevice));
+    for (int run = 0 ; run &lt; nIter; run ++ ) {
+        dim3 dimGrid(M/4);
+        dim3 dimBlock(32,4);
+        Sgemv_v1&lt;&lt;&lt; dimGrid, dimBlock &gt;&gt;&gt;(d_A, d_x, d_y, M, N);
+    }
+    checkCudaErrors(cudaMemcpy( h_y, d_y, bytes_y, cudaMemcpyDeviceToHost));
+
+    // cublas
+    cublasHandle_t blas_handle;  
+    cublasCreate(&amp;blas_handle);
+    float alpha = 1.0;
+    float beta = 0;
+    checkCudaErrors(cudaMemcpy( d_y, h_y1, bytes_y, cudaMemcpyHostToDevice));
+    for (int run = 0 ; run &lt; nIter; run ++ ) {
+        cublasSgemv (blas_handle, CUBLAS_OP_T, 
+            N, M, &amp;alpha, 
+            d_A, N, d_x, 1, &amp;beta, d_y, 1
+        );
+    }
+    checkCudaErrors(cudaMemcpy( h_y1, d_y, bytes_y, cudaMemcpyDeviceToHost));
+    cublasDestroy(blas_handle); 
+    
+    double eps = 1.e-6;  // machine zero
+    bool correct = true;
+    for (int i = 0; i &lt; M; i++) {
+        double abs_err = fabs(h_y[i] - h_y1[i]);
+        double dot_length = M;
+        double abs_val = fabs(h_y[i]);
+        double rel_err = abs_err / abs_val / dot_length;
+        if (rel_err &gt; eps) {
+            printf(&quot;Error! Matrix[%05d]=%.8f, ref=%.8f error term is &gt; %E\n&quot;,
+                    i, h_y[i], h_y1[i], eps);
+            correct = false;
+            break;
+        }
+    }
+
+    printf(&quot;%s\n&quot;, correct ? &quot;Result= PASS&quot; : &quot;Result= FAIL&quot;);
+    
+    // Free Memory
+    cudaFree(d_A);
+    cudaFree(d_x);
+    cudaFree(d_y);
+    
+    free(h_A);
+    free(h_x);
+    free(h_y);
+    free(h_y1);
+}</code></pre>
+              </figure>
+              <p>v0 与 v2 的 kernel 全文已经在上面的逐段解析里完整给出（第 ②、④ 段）。三个文件的 <code>main</code> 结构几乎相同：解析命令行参数 <code>[M] [N]</code>、生成数据（<code>A[i] = i/N</code>、<code>x</code> 全 1，于是 <code>y[i]</code> 约等于 <code>i</code>，便于肉眼核对）、连跑 <code>nIter = 1000</code> 次、再用 <code>cublasSgemv</code> 对拍。差别只有启动配置那一行：</p>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>版本</th><th>grid</th><th>block</th><th>模板实参</th></tr></thead>
+                  <tbody>
+                  <tr><td>v0</td><td>M / 4</td><td>(32, 4)</td><td>—</td></tr>
+                  <tr><td>v1</td><td>M / 4</td><td>(32, 4)</td><td>—</td></tr>
+                  <tr><td>v2</td><td>M / 8</td><td>(32, 4)</td><td><code>&lt;2&gt;</code>（ROW_PER_WARP）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="callout"><span class="callout-title">三份 main 里都没有计时代码</span><p>那个 <code>nIter = 1000</code> 的循环<strong>不是</strong>在测时间，而是为了让 kernel 跑得够久、给 ncu 之类的 profiler 留出足够的采样窗口。文件里没有 <code>cudaEvent</code>，也没有任何耗时/带宽打印。本文表格里的数字是另加计时后测出来的。</p><p>另外，仓库的 <code>main</code> 用 <code>CUBLAS_OP_T</code> 做对拍是对的：行主序的 A 在 cuBLAS 眼里是列主序的 Aᵀ，所以要算 A·x 必须传 <code>CUBLAS_OP_T</code> 并把维度写成 (N, M)。我第一版基准把它写成了 <code>CUBLAS_OP_N</code>，结果因为测试矩阵恰好对称而“看起来通过”——这类错误很容易骗过自己，所以本文的对照同时用 CPU 参考实现交叉验证过。</p></div>
+            </section>
+            <section id="perf">
+              <p class="section-label">CHAPTER 04</p>
+              <h3>实测性能对比分析</h3>
+              <p>测两个形状。<strong>M=N=4096</strong> 是常规推理形状，A 占 64 MiB、总访存 67.1 MB；<strong>M=1024、N=16</strong> 是 v2 专门针对的短行场景，总访存只有 69.6 KB——这个规模下耗时基本由 kernel 启动开销决定，看的应该是绝对微秒数而不是带宽。对照实现是 <code>cublasSgemv</code>，并在 host 侧用 CPU 逐元素算了一遍真值交叉验证。</p>
+<h4>M = N = 4096（常规形状）</h4>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>实现</th><th class="num">耗时 (µs)</th><th class="num">等效带宽 (GB/s)</th><th class="num">占峰值 672 GB/s</th></tr></thead>
+                  <tbody>
+                  <tr><td>v0（warp 一行 + 标量读）</td><td class="num">108.99</td><td class="num">616.0</td><td class="num">91.7%</td></tr>
+                  <tr class="is-best"><td>v1（warp 一行 + float4）</td><td class="num">108.80</td><td class="num">617.1</td><td class="num"><strong>91.8%</strong></td></tr>
+                  <tr><td>cuBLAS</td><td class="num">112.93</td><td class="num">594.6</td><td class="num">88.5%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>三个实现全部正确（对 CPU 真值的最大误差是 0）。结论有两点：<strong>第一，都跑到了带宽上限附近</strong>——91.8% 的峰值占用，距离 100 µs 的理论下限只差 9%；<strong>第二，v0 和 v1 的差距小到看不出来（0.2 µs）。</strong></p>
+              <p>为什么 float4 向量化在 4096 这个规模上没能拉开差距？因为 v0 的访存<strong>本来就是完美合并的</strong>：32 个 lane 读连续的 128 字节，一个事务搬完。v1 把指令条数减到四分之一，但瓶颈在 DRAM 带宽上，而 L1 早就把 v0 那些 4 字节请求合并成同样的事务了——指令发得少，DRAM 那边要搬的字节一个也不少。</p>
+              <p>这和最大化带宽利用率的思路是一致的：当合并度已经满分时，<strong>减少指令数只对“指令发射受限”的负载有用</strong>；纯带宽受限时它不改变 DRAM 的搬运量。顺带说，两个手写 kernel 都略微快过 cuBLAS（约 3%）——在这个形状下，cuBLAS 也没能做得更好。</p>
+<h4>M = 1024，N = 16（短行形状）</h4>
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>实现</th><th class="num">耗时 (µs)</th><th class="num">等效带宽 (GB/s)</th><th class="num">说明</th></tr></thead>
+                  <tbody>
+                  <tr><td>v0</td><td class="num">1.664</td><td class="num">41.9</td><td class="num">超出适用范围：N &lt; 32 会越界读</td></tr>
+                  <tr class="is-best"><td>v2（warp 劈两半）</td><td class="num">1.504</td><td class="num">46.3</td><td class="num"><strong>正确</strong></td></tr>
+                  <tr><td>cuBLAS</td><td class="num">4.512</td><td class="num">15.5</td><td class="num">对小形状没有专门优化</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>这个规模下的绝对耗时都在微秒级，绝大部分是 <strong>kernel 启动开销</strong>（本机实测一个空 kernel 大约 1.5~2 µs），所以带宽数字没有意义，要看的是相对关系。v2 比 cuBLAS 快了 3 倍——但更该注意的是 <strong>v2 比 v0 只快 0.16 µs</strong>，而这 0.16 µs 里还混着测量噪声。</p>
+              <p>换句话说，v2 那套“把 warp 劈成两半、归约宽度降到 16”的改动，在这个规模上带来的收益已经<strong>被启动开销淹没了</strong>。它的价值要在“大量短行、且 kernel 已经启动了”的场景里才体现得出来（比如一次 kernel 里处理几千行）。</p>
+              <div class="callout"><span class="callout-title">v0 那一行不能当真</span><p>v0 在 N=16 下确实打印了“结果正确”，但那是<strong>运气</strong>：它按 N=32 的循环去读第 16~31 列，读到了行外的内存；碰巧 <code>x</code> 数组后面的内存是 0，乘出来的贡献是 0，于是结果看起来对了。换个内存布局或换个分配器，它就会给出错误答案。<strong>越界读返回“正确答案”是这类 bug 最难查的形态。</strong></p></div>
+<h4>关于 A100 上的数据</h4>
+              <p>和前三篇不同，gemv 目录里<strong>没有任何实测性能数据</strong>——README 只有一句“用一个 warp 处理一行或者 2 行”，配套的 <code>Note.md</code> 里给的是理论推算而非测量：</p>
+              <div class="formula">Note.md 里的理论推演（M = N = 4096）：
+  算术强度 ≈ 0.5 FLOP/字节
+  A100 峰值带宽 1555 GB/s、FP32 峰值算力约 19.5 TFLOPS
+  平衡点 = 19.5e12 ÷ 1555e9 ≈ 12.5 FLOP/字节
+  0.5 与 12.5 相差 25 倍 → 纯 memory-bound
+  访存下限 = 67.1e6 字节 ÷ 1555 GB/s ≈ 43 µs</div>
+              <p>这个 43 µs 是<strong>推算值，不是在 A100 上跑出来的</strong>，（而且那份文档借用的是 reduce 目录记录的硬件环境）。所以本文的性能一节只有本机 RTX 5070 的数据，没有跨卡对照。</p>
+            </section>
+            <section id="summary">
+              <p class="section-label">CHAPTER 05</p>
+              <h3>小结</h3>
+              <p>GEMV 这一篇的实测结果，比前几篇更“反直觉”，因为它<strong>没有出现预期的加速</strong>：v1 的 float4 向量化只快了 0.2%，v2 的半个 warp 方案只快了 0.16 µs。</p>
+<div class="callout"><span class="callout-title">为什么优化没生效</span><p><strong>v1 的情况是“已经到顶”。</strong>v0 的访存本来就完美合并——32 个 lane 读连续 128 字节，一个事务搬完，合并度已经是 100%。v1 减掉的是<em>指令条数</em>，但 DRAM 要搬的字节数一个没少。带宽受限的负载上，指令数不是瓶颈。</p><p><strong>v2 的情况是“收益被启动开销吃掉”。</strong>N=16 时整个问题只有 69.6 KB 的数据，kernel 跑 1.5 µs，其中大部分是启动开销。任何算法层面的改进都会被这个固定成本淹没。</p></div>
+              <p>这两条合起来是一个很实用的判据：<strong>优化之前先确认瓶颈在哪一层</strong>。GEMV 这类算子的瓶颈通常在两个地方之一——要么是 DRAM 带宽（那就只能靠提高合并度、减少无效搬运，而 v0 已经把这件事做到了），要么是 kernel 启动/调度开销（那就该考虑把多个小 kernel 合并，或者换更大的 batch）。“把访存向量化”这个标准手法，在这两种瓶颈下都帮不上忙。</p>
+              <p>值得一提的是，三个手写版本里最“朴素”的 v0 在这两个形状下都没吃亏。它的骨架——<strong>一个 warp 一行、lane 之间连续读、寄存器内 shuffle 归约</strong>——已经把 GEMV 的主要矛盾解决掉了，后面的版本都只是在特定形状上抠细节。</p>
+              <p>下一篇：<a class="inline-link" href="fast-atomic-add.html">半精度原子加</a>——换一个完全不同的问题：3350 万个线程往同一个地址做原子加，看怎么把每次操作的宽度从 2 字节凑到 4 字节。</p>
+            </section>
+            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+      <div class="frame-bottom"><span>AI INFRA / OPERATORS</span><span>04 / READING</span></div>
+    </div>
+  </body>
+</html>

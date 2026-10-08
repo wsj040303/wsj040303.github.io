@@ -45,6 +45,20 @@ body {
 
 /* The portrait is framed by two leaves; the dots repeat in page headings. */
 .home-main { position: relative; isolation: isolate; }
+.letter-rain {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  width: 54%;
+  height: 100%;
+  pointer-events: none;
+  opacity: .82;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 94%, transparent);
+}
+.home-photo, .home-intro { position: relative; z-index: 1; }
+.home-main::after { opacity: .2; }
 .home-main::after,
 .catalog-main::after,
 .reader-main::after {
@@ -161,8 +175,10 @@ body {
 @media (max-width: 850px) {
   .site-nav { border-bottom-color: #185035; background: #245a3d; }
   .site-nav a, .site-nav a:first-child { color: var(--cream); }
+  .letter-rain { opacity: .48; }
 }
 @media (max-width: 650px) {
+  .letter-rain { display: none; }
   .site-frame { border-radius: 0; }
   .site-header { border-radius: 0; }
   .home-main::after, .catalog-main::after, .reader-main::after { width: 60px; height: 60px; opacity: .24; }

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="WSJ 的 AI Infra 论文阅读目录，可按标题搜索并按研究方向浏览。">
+    <meta name="theme-color" content="#1e5338">
+    <title>论文阅读 · WSJ</title>
+    <link rel="stylesheet" href="../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../assets/garden.css">
+    <link rel="stylesheet" href="../assets/papers.css">
+    <script src="../assets/site.js" defer></script>
+    <script src="../assets/papers-data.js" defer></script>
+    <script src="../assets/papers.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../">首页</a>
+          <a href="../ai-infra/">AI Infra</a>
+          <a href="./" aria-current="page">论文阅读</a>
+          <a href="../projects/">GitHub 项目</a>
+          <a href="../resources/">推荐资料</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="paper-main" id="main">
+        <div class="paper-heading">
+          <h1>论文阅读</h1>
+          <p>按标题查找、按研究方向整理 AI Infra 论文。当前条目是版式示例，后续可以换成你的阅读记录。</p>
+        </div>
+        <div class="paper-layout">
+          <aside class="paper-filter-panel" aria-label="论文分类">
+            <h2>研究方向</h2>
+            <div class="paper-categories" id="paper-categories"></div>
+          </aside>
+          <section class="paper-library" aria-label="论文列表">
+            <div class="paper-toolbar">
+              <label for="paper-search">搜索论文名称</label>
+              <div class="paper-search-row">
+                <input id="paper-search" type="search" placeholder="输入英文标题、简称或中文名称" autocomplete="off">
+                <button id="paper-search-clear" type="button">清空</button>
+              </div>
+              <p class="paper-count" id="paper-count" aria-live="polite"></p>
+            </div>
+            <div class="paper-grid" id="paper-list"></div>
+            <div class="paper-empty" id="paper-empty" hidden>
+              <h2>没有找到匹配的论文</h2>
+              <p>换个名称试试，或切换研究方向。</p>
+              <button id="paper-reset" type="button">显示全部论文</button>
+            </div>
+            <noscript><p class="paper-noscript">请启用 JavaScript 以使用搜索和分类。</p></noscript>
+          </section>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

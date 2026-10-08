@@ -30,7 +30,7 @@ img { display: block; max-width: 100%; }
 .site-frame {
   display: flex;
   flex-direction: column;
-  width: min(100% - 48px, 1240px);
+  width: calc(100% - 48px);
   min-height: calc(100svh - 48px);
   margin: 24px auto;
   border: 1px solid #31533b;
@@ -237,6 +237,20 @@ img { display: block; max-width: 100%; }
 .placeholder-main h1 { margin: 0 0 15px; font-size: clamp(44px, 5vw, 68px); letter-spacing: -.06em; }
 .placeholder-main p { color: var(--muted); font-size: 15px; line-height: 1.85; }
 .placeholder-main a { display: inline-block; margin-top: 28px; padding-bottom: 7px; border-bottom: 1px solid #8cdaa0; font-size: 13px; }
+
+@media (min-width: 1600px) {
+  .home-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); padding-inline: clamp(90px, 7vw, 180px); }
+  .home-photo { width: clamp(322px, 20vw, 430px); }
+  .home-intro { max-width: 880px; }
+  .home-intro h1 { font-size: clamp(68px, 5vw, 96px); }
+  .home-intro p { font-size: 17px; }
+  .reader-grid { grid-template-columns: clamp(260px, 17vw, 360px) minmax(0, 1fr); }
+  .reader-content > section, .reader-content > h2, .reader-content > p, .reader-content > .reader-actions {
+    max-width: 1500px;
+    margin-inline: auto;
+  }
+  .topic-list.is-operator { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 
 @media (max-width: 1030px) {
   .site-header { grid-template-columns: auto 1fr auto; gap: 18px; padding-inline: 28px; }

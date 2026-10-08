@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA 常见内存层次与作用范围</title>
+  <desc id="desc">两个 SM 各有 L1 缓存与共享内存。Block 内线程使用共享内存；单个线程使用寄存器。多个 SM 访问设备级 L2 缓存与全局内存。局部内存是线程私有的逻辑空间，通常有设备内存后备。</desc>
+  <rect width="960" height="520" fill="#f4f8ed"/>
+  <text x="30" y="35" fill="#1c5135" font-family="Arial, sans-serif" font-size="17" font-weight="700">从线程私有到设备共享：可见范围逐渐扩大</text>
+  <rect x="30" y="55" width="900" height="374" rx="18" fill="#e2efdc" stroke="#7da776" stroke-width="2"/>
+  <text x="51" y="83" fill="#1c5336" font-family="Arial, sans-serif" font-size="18" font-weight="700">GPU Device</text>
+  <g font-family="Arial, sans-serif" fill="#28523a">
+    <rect x="52" y="102" width="415" height="211" rx="13" fill="#fffdf7" stroke="#a3c29c" stroke-width="2"/>
+    <text x="71" y="129" font-size="17" font-weight="700">SM 0</text>
+    <rect x="70" y="143" width="379" height="34" rx="7" fill="#e2eddc"/><text x="83" y="166" font-size="14">L1 Cache · 该 SM 的缓存</text>
+    <rect x="70" y="189" width="379" height="107" rx="9" fill="#eaf2e4" stroke="#bad0b3"/>
+    <text x="85" y="214" font-size="15" font-weight="700">Block 0 · Shared Memory 块内共享</text>
+    <rect x="85" y="229" width="164" height="49" rx="8" fill="#fffdf7" stroke="#bdd2b7"/><text x="97" y="259" font-size="13">Thread 0 · Registers</text>
+    <rect x="268" y="229" width="164" height="49" rx="8" fill="#fffdf7" stroke="#bdd2b7"/><text x="280" y="259" font-size="13">Thread 1 · Registers</text>
+    <rect x="493" y="102" width="415" height="211" rx="13" fill="#fffdf7" stroke="#a3c29c" stroke-width="2"/>
+    <text x="512" y="129" font-size="17" font-weight="700">SM 1 ···</text>
+    <rect x="511" y="143" width="379" height="34" rx="7" fill="#e2eddc"/><text x="524" y="166" font-size="14">L1 Cache · 该 SM 的缓存</text>
+    <rect x="511" y="189" width="379" height="107" rx="9" fill="#eaf2e4" stroke="#bad0b3"/>
+    <text x="526" y="214" font-size="15" font-weight="700">Block 1 · Shared Memory 块内共享</text>
+    <rect x="526" y="229" width="164" height="49" rx="8" fill="#fffdf7" stroke="#bdd2b7"/><text x="538" y="259" font-size="13">Thread 0 · Registers</text>
+    <rect x="709" y="229" width="164" height="49" rx="8" fill="#fffdf7" stroke="#bdd2b7"/><text x="721" y="259" font-size="13">Thread 1 · Registers</text>
+  </g>
+  <rect x="52" y="329" width="856" height="37" rx="8" fill="#b5d2b4"/>
+  <text x="69" y="355" fill="#164a2e" font-family="Arial, sans-serif" font-size="15" font-weight="700">L2 Cache · 多个 SM 共享的设备级缓存</text>
+  <rect x="52" y="378" width="856" height="37" rx="8" fill="#88b38b"/>
+  <text x="69" y="404" fill="#123e29" font-family="Arial, sans-serif" font-size="15" font-weight="700">Global Memory · 设备全局内存，所有 Block 可访问</text>
+  <rect x="30" y="446" width="900" height="49" rx="10" fill="#fffdf7" stroke="#bad0b3"/>
+  <text x="49" y="475" fill="#405f48" font-family="Arial, sans-serif" font-size="14">Local Memory：仅本线程可见的逻辑空间，通常以设备内存为后备；“local”不代表片上存储。</text>
+</svg>

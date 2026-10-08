@@ -1,0 +1,11 @@
+.cuda-article .cuda-figure { margin: 22px 0 25px; overflow-x: auto; border: 1px solid #cbdcc4; border-radius: 14px; background: #f4f8ed; }
+.cuda-article .cuda-figure img { display: block; width: 100%; min-width: 680px; height: auto; }
+.cuda-article .cuda-figure figcaption { padding: 12px 16px 14px; border-top: 1px solid #d8e5cf; color: #496553; font-size: 12px; line-height: 1.7; }
+.cuda-article .cuda-figure figcaption a { color: #236c40; text-decoration: underline; text-underline-offset: 3px; }
+.cuda-article .cuda-figure figcaption a:hover { color: #144f30; }
+.cuda-article .cuda-sources li { margin-bottom: 10px; }
+.cuda-article strong { color: #1d5937; }
+@media (max-width: 650px) {
+  .cuda-article .cuda-figure { margin-inline: -8px; }
+  .cuda-article .cuda-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
+}

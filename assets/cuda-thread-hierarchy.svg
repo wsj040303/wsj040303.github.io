@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA Grid、Block、Warp、Thread 层次</title>
+  <desc id="desc">一次 Kernel 启动创建 Grid，Grid 含多个 Block；一个 Block 的线程划分为每组 32 个线程的 Warp，Thread 是最内层逻辑实例。</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#4a8155" stroke-width="2"/></marker></defs>
+  <rect width="960" height="420" fill="#f4f8ed"/>
+  <text x="30" y="35" fill="#1c5135" font-family="Arial, sans-serif" font-size="17" font-weight="700">逻辑执行层次</text>
+  <rect x="30" y="56" width="900" height="135" rx="17" fill="#e1edda" stroke="#77a56d" stroke-width="2"/>
+  <text x="49" y="84" fill="#1d5a38" font-family="Arial, sans-serif" font-size="18" font-weight="700">Grid · 一次 Kernel 启动</text>
+  <g font-family="Arial, sans-serif" font-size="16" fill="#284b34" text-anchor="middle">
+    <rect x="52" y="106" width="194" height="58" rx="10" fill="#fffdf7" stroke="#90b188"/><text x="149" y="142">Block 0</text>
+    <rect x="270" y="106" width="194" height="58" rx="10" fill="#fffdf7" stroke="#90b188"/><text x="367" y="142">Block 1</text>
+    <rect x="488" y="106" width="194" height="58" rx="10" fill="#fffdf7" stroke="#90b188"/><text x="585" y="142">Block 2</text>
+    <rect x="706" y="106" width="194" height="58" rx="10" fill="#fffdf7" stroke="#90b188"/><text x="803" y="142">Block 3 ···</text>
+  </g>
+  <path d="M367 170 V215 H247 V236" fill="none" stroke="#4a8155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="306" y="214" fill="#3d6d4c" font-family="Arial, sans-serif" font-size="13">放大一个 Block</text>
+  <rect x="30" y="241" width="415" height="147" rx="17" fill="#fffdf7" stroke="#91b489" stroke-width="2"/>
+  <text x="49" y="270" fill="#1d5a38" font-family="Arial, sans-serif" font-size="18" font-weight="700">Block · 一组协作线程</text>
+  <rect x="51" y="289" width="177" height="72" rx="10" fill="#e8f1df" stroke="#a5c398"/>
+  <text x="66" y="315" fill="#2c5a3b" font-family="Arial, sans-serif" font-size="16" font-weight="700">Warp 0</text>
+  <text x="66" y="341" fill="#355944" font-family="Arial, sans-serif" font-size="15">Thread 0–31</text>
+  <rect x="246" y="289" width="177" height="72" rx="10" fill="#e8f1df" stroke="#a5c398"/>
+  <text x="261" y="315" fill="#2c5a3b" font-family="Arial, sans-serif" font-size="16" font-weight="700">Warp 1 ···</text>
+  <text x="261" y="341" fill="#355944" font-family="Arial, sans-serif" font-size="15">Thread 32–63</text>
+  <path d="M447 326 H493" stroke="#4a8155" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="508" y="241" width="422" height="147" rx="17" fill="#e4efe0" stroke="#91b489" stroke-width="2"/>
+  <text x="527" y="270" fill="#1d5a38" font-family="Arial, sans-serif" font-size="18" font-weight="700">Warp · 32 个 Thread</text>
+  <g font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#245038">
+    <rect x="528" y="291" width="85" height="44" rx="8" fill="#fffdf7" stroke="#abc7a0"/><text x="570" y="319">T0–T7</text>
+    <rect x="626" y="291" width="85" height="44" rx="8" fill="#fffdf7" stroke="#abc7a0"/><text x="668" y="319">T8–T15</text>
+    <rect x="724" y="291" width="85" height="44" rx="8" fill="#fffdf7" stroke="#abc7a0"/><text x="766" y="319">T16–T23</text>
+    <rect x="822" y="291" width="85" height="44" rx="8" fill="#fffdf7" stroke="#abc7a0"/><text x="864" y="319">T24–T31</text>
+  </g>
+  <text x="528" y="364" fill="#53705a" font-family="Arial, sans-serif" font-size="13">每个小格代表 8 个线程，合计 32 个。</text>
+</svg>

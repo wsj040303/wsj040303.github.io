@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA Host 与 Device 的一次计算流程</title>
+  <desc id="desc">CPU 负责数据准备、内存分配和启动 Kernel；输入复制到 GPU 全局内存，Kernel 在 SM 上执行，结果复制回 CPU。</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#327653" stroke-width="2"/></marker></defs>
+  <rect width="960" height="340" fill="#f4f8ed"/>
+  <text x="34" y="35" fill="#1c5135" font-family="Arial, sans-serif" font-size="17" font-weight="700">一次 CUDA 计算：由 Host 发起，在 Device 执行</text>
+  <rect x="34" y="60" width="268" height="226" rx="18" fill="#e3eed8" stroke="#80ac78" stroke-width="2"/>
+  <text x="56" y="91" fill="#1b5436" font-family="Arial, sans-serif" font-size="20" font-weight="700">CPU · Host</text>
+  <rect x="56" y="109" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="74" y="138" fill="#254934" font-family="Arial, sans-serif" font-size="16">准备 a、b 输入</text>
+  <rect x="56" y="165" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="74" y="194" fill="#254934" font-family="Arial, sans-serif" font-size="16">分配设备内存并复制</text>
+  <rect x="56" y="221" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="74" y="250" fill="#254934" font-family="Arial, sans-serif" font-size="16">接收 c 并验证</text>
+  <rect x="656" y="60" width="268" height="226" rx="18" fill="#dbebdc" stroke="#6b9b75" stroke-width="2"/>
+  <text x="678" y="91" fill="#1b5436" font-family="Arial, sans-serif" font-size="20" font-weight="700">GPU · Device</text>
+  <rect x="678" y="109" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="696" y="138" fill="#254934" font-family="Arial, sans-serif" font-size="16">全局内存：a、b、c</text>
+  <rect x="678" y="165" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="696" y="194" fill="#254934" font-family="Arial, sans-serif" font-size="16">SM 执行 Kernel</text>
+  <rect x="678" y="221" width="224" height="45" rx="9" fill="#fffdf7" stroke="#b9d0ac"/>
+  <text x="696" y="250" fill="#254934" font-family="Arial, sans-serif" font-size="16">全局内存中的结果 c</text>
+  <path d="M310 124 H642" stroke="#327653" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="395" y="111" fill="#2b6645" font-family="Arial, sans-serif" font-size="15" font-weight="700">① 复制输入</text>
+  <path d="M310 180 H642" stroke="#327653" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="395" y="168" fill="#2b6645" font-family="Arial, sans-serif" font-size="15" font-weight="700">② 启动 Kernel</text>
+  <path d="M648 242 H315" stroke="#327653" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="395" y="229" fill="#2b6645" font-family="Arial, sans-serif" font-size="15" font-weight="700">③ 复制结果</text>
+  <text x="34" y="317" fill="#57735b" font-family="Arial, sans-serif" font-size="13">图中展示显式 cudaMalloc / cudaMemcpy 流程；统一内存有不同的数据管理方式。</text>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA Block 与 GPU SM 的对应关系</title>
+  <desc id="desc">左侧 Grid 的 Block 由 GPU 动态分配到多个 SM。一个 Block 总在同一个 SM 上，资源允许时一个 SM 可同时驻留多个 Block。多个 SM 共用设备级 L2 缓存和全局内存。</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#5d9470" stroke-width="2"/></marker></defs>
+  <rect width="960" height="460" fill="#f4f8ed"/>
+  <text x="30" y="35" fill="#1c5135" font-family="Arial, sans-serif" font-size="17" font-weight="700">逻辑 Block 由设备调度到可用 SM</text>
+  <rect x="30" y="60" width="268" height="332" rx="17" fill="#e2efdc" stroke="#84aa7d" stroke-width="2"/>
+  <text x="52" y="92" fill="#20583a" font-family="Arial, sans-serif" font-size="18" font-weight="700">Grid · 程序定义</text>
+  <g font-family="Arial, sans-serif" font-size="16" text-anchor="middle" fill="#31563c">
+    <rect x="52" y="112" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="102" y="148">Block 0</text>
+    <rect x="175" y="112" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="225" y="148">Block 1</text>
+    <rect x="52" y="188" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="102" y="224">Block 2</text>
+    <rect x="175" y="188" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="225" y="224">Block 3</text>
+    <rect x="52" y="264" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="102" y="300">Block 4</text>
+    <rect x="175" y="264" width="100" height="60" rx="9" fill="#fffdf7" stroke="#aac69f"/><text x="225" y="300">Block 5</text>
+  </g>
+  <text x="52" y="361" fill="#54705b" font-family="Arial, sans-serif" font-size="13">可能还有更多 Block ···</text>
+  <path d="M306 153 C355 153 344 128 394 128" fill="none" stroke="#5d9470" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#arrow)"/>
+  <path d="M306 225 C354 225 345 219 394 219" fill="none" stroke="#5d9470" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#arrow)"/>
+  <path d="M306 297 C354 297 345 309 394 309" fill="none" stroke="#5d9470" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#arrow)"/>
+  <rect x="399" y="60" width="531" height="332" rx="17" fill="#dcebdc" stroke="#84aa7d" stroke-width="2"/>
+  <text x="421" y="92" fill="#20583a" font-family="Arial, sans-serif" font-size="18" font-weight="700">GPU · 物理硬件</text>
+  <g font-family="Arial, sans-serif" fill="#28523a">
+    <rect x="420" y="107" width="149" height="171" rx="11" fill="#fffdf7" stroke="#9dbb95"/><text x="436" y="133" font-size="17" font-weight="700">SM 0</text><rect x="435" y="150" width="119" height="47" rx="7" fill="#e8f1df"/><text x="451" y="180" font-size="14">Block 0</text><rect x="435" y="209" width="119" height="47" rx="7" fill="#e8f1df"/><text x="451" y="239" font-size="14">Block 3</text>
+    <rect x="590" y="107" width="149" height="171" rx="11" fill="#fffdf7" stroke="#9dbb95"/><text x="606" y="133" font-size="17" font-weight="700">SM 1</text><rect x="605" y="150" width="119" height="47" rx="7" fill="#e8f1df"/><text x="621" y="180" font-size="14">Block 1</text><rect x="605" y="209" width="119" height="47" rx="7" fill="#e8f1df"/><text x="621" y="239" font-size="14">Block 4</text>
+    <rect x="760" y="107" width="149" height="171" rx="11" fill="#fffdf7" stroke="#9dbb95"/><text x="776" y="133" font-size="17" font-weight="700">SM 2 ···</text><rect x="775" y="150" width="119" height="47" rx="7" fill="#e8f1df"/><text x="791" y="180" font-size="14">Block 2</text><rect x="775" y="209" width="119" height="47" rx="7" fill="#e8f1df"/><text x="791" y="239" font-size="14">Block 5</text>
+  </g>
+  <rect x="420" y="298" width="489" height="30" rx="8" fill="#b8d5b4"/>
+  <text x="436" y="319" fill="#174b30" font-family="Arial, sans-serif" font-size="15" font-weight="700">设备级 L2 缓存</text>
+  <rect x="420" y="340" width="489" height="30" rx="8" fill="#8bb68c"/>
+  <text x="436" y="361" fill="#123d28" font-family="Arial, sans-serif" font-size="15" font-weight="700">设备全局内存 · GPU DRAM</text>
+  <text x="30" y="428" fill="#53705a" font-family="Arial, sans-serif" font-size="13">示意中的 Block 分配仅为举例；实际分配与同时驻留数量取决于设备、资源使用量和调度。</text>
+</svg>

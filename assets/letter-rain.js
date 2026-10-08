@@ -57,7 +57,7 @@ if (letterCanvas) {
         if (delta && Math.random() < .004) stream.characters[index] = glyph();
         const edgeFade = Math.min(1, y / 100, (height - y) / 100);
         const tailFade = 1 - index / stream.characters.length;
-        const alpha = (.045 + .16 * tailFade) * edgeFade * stream.strength;
+        const alpha = (.08 + .24 * tailFade) * edgeFade * stream.strength;
         context.fillStyle = `rgba(42, 94, 59, ${alpha})`;
         context.fillText(character, stream.x, y);
       });

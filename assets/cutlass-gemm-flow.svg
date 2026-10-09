@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 510" role="img" aria-labelledby="title desc">
+  <title id="title">CUTLASS GEMM 分块与数据流示意</title>
+  <desc id="desc">把输出矩阵切成 tile；一个输出 tile 沿 K 维依次读取 A、B 的子块，经共享内存搬运和矩阵乘加累积，最后经过 epilogue 写回。</desc>
+  <defs>
+    <style>.title{font:700 19px Arial,'Microsoft YaHei',sans-serif;fill:#194e33}.head{font:700 16px Arial,'Microsoft YaHei',sans-serif;fill:#205139}.body{font:14px Arial,'Microsoft YaHei',sans-serif;fill:#375b42}.note{font:13px Arial,'Microsoft YaHei',sans-serif;fill:#597461}</style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 9 5 1 9" fill="none" stroke="#3c8055" stroke-width="2"/></marker>
+    <pattern id="tiles" width="45" height="38" patternUnits="userSpaceOnUse"><path d="M45 0H0V38" fill="none" stroke="#a6c49b" stroke-width="1.5"/></pattern>
+  </defs>
+  <rect width="960" height="510" fill="#f4f8ed"/>
+  <text class="title" x="34" y="37">GEMM：一个输出 tile 怎样产生</text>
+  <text class="note" x="34" y="61">D = αAB + βC；图示突出 A、B 的乘加主路径</text>
+  <rect x="35" y="91" width="890" height="142" rx="16" fill="#e9f1e2" stroke="#abc79f" stroke-width="2"/>
+  <text class="head" x="55" y="122">① 输出矩阵按 M × N 切块</text>
+  <rect x="55" y="141" width="251" height="72" fill="#fffdf6" stroke="#7fa977" stroke-width="2"/>
+  <rect x="55" y="141" width="251" height="72" fill="url(#tiles)"/>
+  <rect x="145" y="179" width="45" height="34" fill="#75aa66" stroke="#326b43" stroke-width="2"/>
+  <text class="body" x="329" y="171">不同线程块 / 线程块簇负责不同输出区域</text>
+  <text class="body" x="329" y="196">绿色小块是本图追踪的一个输出 tile</text>
+  <path d="M478 236 V263" stroke="#3c8055" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="35" y="275" width="270" height="154" rx="15" fill="#f3eacf" stroke="#d5bd83" stroke-width="2"/>
+  <text class="head" x="54" y="307">② 沿 K 维读取输入 tile</text>
+  <rect x="55" y="324" width="95" height="64" rx="8" fill="#fffdf6" stroke="#c8ab72"/>
+  <rect x="170" y="324" width="95" height="64" rx="8" fill="#fffdf6" stroke="#c8ab72"/>
+  <text class="head" x="92" y="363">A</text>
+  <text class="head" x="207" y="363">B</text>
+  <text class="note" x="55" y="411">从全局内存分段取数</text>
+  <path d="M311 350 H338" stroke="#3c8055" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="350" y="275" width="260" height="154" rx="15" fill="#e0ecda" stroke="#8db886" stroke-width="2"/>
+  <text class="head" x="369" y="307">③ 搬运与复用</text>
+  <rect x="370" y="325" width="220" height="63" rx="9" fill="#fffdf6" stroke="#92b68a"/>
+  <text class="body" x="386" y="353">共享内存 / 片上存储</text>
+  <text class="body" x="386" y="374">按布局分配给参与线程</text>
+  <text class="note" x="370" y="411">常用流水线重叠搬运和计算</text>
+  <path d="M615 350 H642" stroke="#3c8055" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="653" y="275" width="272" height="154" rx="15" fill="#dcebe3" stroke="#83ae95" stroke-width="2"/>
+  <text class="head" x="672" y="307">④ 矩阵乘加与输出</text>
+  <rect x="673" y="325" width="107" height="63" rx="9" fill="#fffdf6" stroke="#89b19b"/>
+  <rect x="798" y="325" width="107" height="63" rx="9" fill="#fffdf6" stroke="#89b19b"/>
+  <text class="head" x="707" y="354">MMA</text>
+  <text class="note" x="689" y="374">累积结果</text>
+  <path d="M784 356 H793" stroke="#3c8055" stroke-width="2" marker-end="url(#arrow)"/>
+  <text class="head" x="813" y="354">D tile</text>
+  <text class="note" x="815" y="374">epilogue 写回</text>
+  <text class="note" x="653" y="411">可融合缩放、逐元素处理等</text>
+  <text class="note" x="35" y="473">概念图：实际使用的共享内存、寄存器与 MMA 指令取决于架构、数据类型和 Kernel 实现。</text>
+</svg>

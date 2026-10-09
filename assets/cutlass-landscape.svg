@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" role="img" aria-labelledby="title desc">
+  <title id="title">CUDA、CUTLASS 与 Triton 的关系</title>
+  <desc id="desc">四种 Kernel 编写路径并列：CUDA C++、CUTLASS C++、CUTLASS Python CuTe DSL、Triton。它们最终运行在 GPU 上，CUDA 是 NVIDIA GPU 的基础平台。</desc>
+  <defs>
+    <style>.title{font:700 19px Arial,'Microsoft YaHei',sans-serif;fill:#194e33}.label{font:700 17px Arial,'Microsoft YaHei',sans-serif;fill:#214d35}.small{font:14px Arial,'Microsoft YaHei',sans-serif;fill:#42634b}.base{font:700 18px Arial,'Microsoft YaHei',sans-serif;fill:#fffdf7}</style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 9 5 1 9" fill="none" stroke="#37764e" stroke-width="2"/></marker>
+  </defs>
+  <rect width="960" height="380" fill="#f4f8ed"/>
+  <text class="title" x="35" y="38">从“写 Kernel”到“在 GPU 执行”</text>
+  <text class="small" x="35" y="65">上层是不同的编写与复用方式；下层是共同依赖的 NVIDIA GPU 执行环境</text>
+  <g stroke-width="2">
+    <rect x="35" y="93" width="210" height="153" rx="14" fill="#e0ecda" stroke="#9bbe91"/>
+    <rect x="262" y="93" width="210" height="153" rx="14" fill="#e8eed6" stroke="#9bbe91"/>
+    <rect x="489" y="93" width="210" height="153" rx="14" fill="#f4e9d0" stroke="#d4bc8e"/>
+    <rect x="716" y="93" width="210" height="153" rx="14" fill="#e1ece8" stroke="#91b5a5"/>
+  </g>
+  <text class="label" x="53" y="129">CUDA C++</text>
+  <text class="small" x="53" y="159">直接编写线程与 Kernel</text>
+  <text class="small" x="53" y="184">手动组织访存和协作</text>
+  <text class="label" x="280" y="129">CUTLASS C++</text>
+  <text class="small" x="280" y="159">组合 GEMM 等算子部件</text>
+  <text class="small" x="280" y="184">选择 tile 与计算策略</text>
+  <text class="label" x="507" y="129">CuTe DSL</text>
+  <text class="small" x="507" y="159">CUTLASS Python 路径</text>
+  <text class="small" x="507" y="184">显式描述布局与搬运</text>
+  <text class="label" x="734" y="129">Triton</text>
+  <text class="small" x="734" y="159">Python 块级程序</text>
+  <text class="small" x="734" y="184">编译器处理更多底层细节</text>
+  <path d="M140 253 V281" stroke="#37764e" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M367 253 V281" stroke="#37764e" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M594 253 V281" stroke="#37764e" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M821 253 V281" stroke="#37764e" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="35" y="290" width="891" height="56" rx="13" fill="#276447"/>
+  <text class="base" x="55" y="325">CUDA 平台与 NVIDIA GPU</text>
+  <text x="406" y="325" font-family="Arial,'Microsoft YaHei',sans-serif" font-size="14" fill="#e9f6e6">执行模型 · 内存层次 · 硬件指令</text>
+</svg>

@@ -1,0 +1,12 @@
+.cutlass-article .cutlass-figure { margin: 22px 0 25px; overflow-x: auto; border: 1px solid #cbdcc4; border-radius: 14px; background: #f4f8ed; }
+.cutlass-article .cutlass-figure img { display: block; width: 100%; min-width: 680px; height: auto; }
+.cutlass-article .cutlass-figure figcaption { padding: 12px 16px 14px; border-top: 1px solid #d8e5cf; color: #496553; font-size: 12px; line-height: 1.7; }
+.cutlass-article .cutlass-figure figcaption a { color: #236c40; text-decoration: underline; text-underline-offset: 3px; }
+.cutlass-article .cutlass-figure figcaption a:hover { color: #144f30; }
+.cutlass-article strong { color: #1d5937; }
+.cutlass-article .source-note { margin-top: 20px; font-size: 12px; color: #58755d; }
+.article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
+@media (max-width: 650px) {
+  .cutlass-article .cutlass-figure { margin-inline: -8px; }
+  .cutlass-article .cutlass-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
+}

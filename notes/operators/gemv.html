@@ -25,7 +25,7 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>GEMV 矩阵向量乘</nav>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="../cuda/index.html">CUDA</a><span>/</span>GEMV 矩阵向量乘</nav>
         <div class="reader-heading">
           <h1>GEMV 矩阵向量乘</h1>
         </div>
@@ -485,7 +485,7 @@ int main(int argc, char** argv) {
               <p>值得一提的是，三个手写版本里最“朴素”的 v0 在这两个形状下都没吃亏。它的骨架——<strong>一个 warp 一行、lane 之间连续读、寄存器内 shuffle 归约</strong>——已经把 GEMV 的主要矛盾解决掉了，后面的版本都只是在特定形状上抠细节。</p>
               <p>下一篇：<a class="inline-link" href="fast-atomic-add.html">半精度原子加</a>——换一个完全不同的问题：3350 万个线程往同一个地址做原子加，看怎么把每次操作的宽度从 2 字节凑到 4 字节。</p>
             </section>
-            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+            <div class="reader-actions"><a href="../cuda/index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>
       </main>

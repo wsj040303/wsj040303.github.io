@@ -25,7 +25,7 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>最近邻 2 倍上采样</nav>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="../cuda/index.html">CUDA</a><span>/</span>最近邻 2 倍上采样</nav>
         <div class="reader-heading">
           <h1>最近邻 2 倍上采样</h1>
         </div>
@@ -404,7 +404,7 @@ int main(){
               <div class="callout"><span class="callout-title">结论二：Pack2X 是“刚好够用”的宽度</span><p>它只把两个元素绑在一起，没有追求一次搬满 16 字节。原因很实际：正向的 4 个输出位置本来就是“上下两行各两个”，水平方向相邻的两个必须写同一个值——<strong>打包 2 个是数据结构决定的，不是硬凑的</strong>。</p><p>这和 elementwise 里那个“包宽由 16 字节除以元素大小算出来”的思路不同：那边是让编译器算最优宽度，这边是根据语义事实选一个刚好贴合的宽度。两种都成立，但后者通常更简单、也更好理解。</p></div>
               <p>下一篇：<a class="inline-link" href="gemv.html">GEMV 矩阵向量乘</a>——换一类问题：这次瓶颈不再是写宽度，而是“一个 warp 怎么协作算出一行点积”。</p>
             </section>
-            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+            <div class="reader-actions"><a href="../cuda/index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>
       </main>

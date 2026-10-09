@@ -25,7 +25,7 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>半精度原子加</nav>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="../cuda/index.html">CUDA</a><span>/</span>半精度原子加</nav>
         <div class="reader-heading">
           <h1>半精度原子加</h1>
         </div>
@@ -568,9 +568,9 @@ RTX 5070 (672 GB/s)  1.43 ns          1.18 ns          1.22×
               <p>另外一个更基础的收获是关于<strong>基线</strong>的：同一份优化，在 A100 上值 3.08 倍，在本机值 1.22 倍。原因不是代码变差了，而是本机的 2 字节原子加本来就不那么差。这和前面 elementwise（A100 上 1.69× / 本机 1.06×）、reduce（A100 上 9.94× / 本机 2.20×）是同一个规律：</p>
               <div class="callout"><span class="callout-title">跨卡照搬优化手法的风险</span><p>看到一个 3 倍的优化案例，先问一句：<strong>它的基线为什么那么慢？</strong></p><p>如果基线慢是因为硬件本身的短板（A100 的窄原子通路、A100 上 2 字节访存喂不饱 1555 GB/s），那换一张没有这个短板的卡，收益就会大幅缩水——甚至像 reduce 的 v1 那样变成负收益。</p><p>反过来，真正可移植的是<strong>“先定位瓶颈，再决定要不要动手”</strong>这个方法本身。</p></div>
               <p>这一篇也是五篇里的最后一篇。五个算子走下来，带宽受限（reduce、elementwise、upsample、gemv）和原子竞争（本篇）这两类问题各占一半，而每一类的优化空间都高度依赖目标硬件——这大概是这组实测里最一致的一条结论。</p>
-              <p><a class="inline-link" href="./">← 返回 CUDA 算子优化目录</a></p>
+              <p><a class="inline-link" href="../cuda/index.html">← 返回 CUDA 专题</a></p>
             </section>
-            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+            <div class="reader-actions"><a href="../cuda/index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>
       </main>

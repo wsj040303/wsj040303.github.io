@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUDA 专题：从执行模型、线程与内存入门，到 reduce、elementwise、upsample、gemv 和 atomicAdd 算子优化。">
+    <meta name="theme-color" content="#0b2015">
+    <title>CUDA · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="catalog-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span>CUDA</nav>
+        <div class="page-heading">
+          <h1>CUDA</h1>
+        </div>
+        <section class="catalog-box" aria-label="CUDA 文章目录">
+          <div class="topic-list is-operator">
+            <a class="topic-card" href="../cuda.html">
+              <h2>CUDA 入门编程</h2>
+              <p>用架构图理解 GPU、SM、线程层次和内存，再动手编写第一个 Kernel。</p>
+            </a>
+            <a class="topic-card" href="../operators/reduce.html">
+              <h2>归约求和</h2>
+              <p>把一个数组求和收成一个数。从 shared memory 树形归约出发，经 9 个版本压到显存带宽上限。</p>
+            </a>
+            <a class="topic-card" href="../operators/elementwise.html">
+              <h2>逐点运算</h2>
+              <p>r[i] = f(a[i], b[i])，形状不变。OneFlow 模板把 half 的 2 字节访存打包成 128 位。</p>
+            </a>
+            <a class="topic-card" href="../operators/upsample-nearest2d.html">
+              <h2>最近邻 2 倍上采样</h2>
+              <p>每个输入像素复制成 2×2 输出块，元素数 ×4。用 Pack2X 把写宽度翻倍，反向顺便甩掉 atomicAdd。</p>
+            </a>
+            <a class="topic-card" href="../operators/gemv.html">
+              <h2>矩阵向量乘</h2>
+              <p>y = A·x，一个 warp 承包一行。标量读 → float4 向量化 → 一个 warp 管两行。</p>
+            </a>
+            <a class="topic-card" href="../operators/fast-atomic-add.html">
+              <h2>半精度原子加</h2>
+              <p>3350 万条原子指令打向同一个地址。把 2 字节原子加换成 4 字节，靠 pack 或运行期对齐凑宽度。</p>
+            </a>
+          </div>
+          <p class="catalog-note">算子优化文章的实测环境：RTX 5070（sm_120）与 CUDA 13.4。测试方法见各篇性能章节。</p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

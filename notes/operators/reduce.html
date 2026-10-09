@@ -25,7 +25,7 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>Reduce 归约求和</nav>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="../cuda/index.html">CUDA</a><span>/</span>Reduce 归约求和</nav>
         <div class="reader-heading">
           <h1>Reduce 归约求和</h1>
         </div>
@@ -604,7 +604,7 @@ int main(){
               <p>最有价值的一条经验或许是：<strong>要先把瓶颈定位对，再动手</strong>。v1 和 v2 的优化本身没有错——消发散、消 bank conflict 都是标准手法——但它们优化的是一个还没成为瓶颈的地方，所以一个变慢、一个白干。如果只按“标准优化清单”一条条往下做，很容易停在 43% 的带宽占用率上，还以为已经优化完了。</p>
               <p>下一篇：<a class="inline-link" href="elementwise.html">逐点运算</a>——同样是带宽受限，但这次要处理的是 half 类型的 2 字节访存，看 OneFlow 的模板怎么用编译期计算把访存指令再压一轮。</p>
             </section>
-            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+            <div class="reader-actions"><a href="../cuda/index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>
       </main>

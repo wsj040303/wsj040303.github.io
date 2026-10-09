@@ -25,7 +25,7 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="./">CUDA 算子优化</a><span>/</span>Element-wise 逐点运算</nav>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="../cuda/index.html">CUDA</a><span>/</span>Element-wise 逐点运算</nav>
         <div class="reader-heading">
           <h1>Element-wise 逐点运算</h1>
         </div>
@@ -555,7 +555,7 @@ struct SimpleFactory {
               <p>而它的性能故事则是一堂更实际的课：<strong>打包访存不是万能药</strong>。当元素本身就是 4 字节、且相邻线程已经连续访问时，一个 warp 天然就凑满了 128 字节的事务，再打包不会有任何收益；只有当元素类型窄于通路宽度（half 的 2 字节、或者 int8 之类的 1 字节）时，打包才真正开始起作用。</p>
               <p>下一篇：<a class="inline-link" href="upsample-nearest2d.html">最近邻 2 倍上采样</a>——同样是打包访存，但这次输出比输入大 4 倍，写多读少，而且反向传播里还能顺手甩掉 atomicAdd。</p>
             </section>
-            <div class="reader-actions"><a href="./">← 返回算子目录</a><a href="#main">回到顶部 ↑</a></div>
+            <div class="reader-actions"><a href="../cuda/index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>
       </main>

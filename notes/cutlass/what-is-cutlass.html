@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUTLASS 是什么？从 GEMM 分块、CuTe 布局、数据搬运到 CUDA 与 Triton 的对照，建立整体认识。">
+    <meta name="theme-color" content="#0b2015">
+    <title>CUTLASS 是什么？· WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/cutlass.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资料</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">CUTLASS</a><span>/</span>01 · 整体认识</nav>
+        <div class="reader-heading"><h1>CUTLASS 是什么？</h1><p class="article-deck">用一张 GEMM 地图，理解它与 CUDA、Triton 的关系</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>文章目录</summary>
+              <nav aria-label="本文目录">
+                <ol class="chapter-list">
+                  <li><a href="#overview">一句话认识</a></li>
+                  <li><a href="#why-gemm">为什么从 GEMM 出发</a></li>
+                  <li><a href="#tiling">分块与数据流</a></li>
+                  <li><a href="#inside">CUTLASS 里有什么</a></li>
+                  <li><a href="#compare">与 CUDA、Triton 比较</a></li>
+                  <li><a href="#when">什么时候用</a></li>
+                  <li><a href="#reading">阅读路线与资料</a></li>
+                </ol>
+              </nav>
+            </details>
+          </aside>
+          <article class="reader-content cutlass-article">
+            <section id="overview">
+              <h3>一句话认识 CUTLASS</h3>
+              <p><strong>CUTLASS</strong> 是 NVIDIA 提供的开源工具箱，核心目标是在 CUDA 上构建高性能的矩阵乘法（GEMM）及相关计算。它把分块、线程与数据的映射、内存搬运、矩阵乘加和输出处理拆成可以组合、替换的部件。这样写自定义 Kernel 时，不必每次都从最底层重新实现整条计算流水线。</p>
+              <p>它与 CUDA 的关系是“<strong>建立在 CUDA 之上</strong>”：Kernel 最终仍在 NVIDIA GPU 上按 CUDA 执行模型运行。CUTLASS 最早以 CUDA C++ 模板库为主；现在的官方文档同时覆盖 <strong>CUTLASS C++</strong> 和用 Python 语法编写 Kernel 的 <strong>CUTLASS Python / CuTe DSL</strong>。因此，把 CUTLASS 简单等同于“一个 C++ GEMM 模板”已经不完整。</p>
+              <div class="callout"><span class="callout-title">先记住</span><p>CUDA 提供 GPU 编程的基础平台与执行模型；CUTLASS 把高性能线性代数 Kernel 中反复出现的结构封装成可组合的积木。它的中心场景是 GEMM，但项目也包含卷积、归约和其他相关组件。</p></div>
+              <figure class="cutlass-figure"><img src="../../assets/cutlass-landscape.svg" alt="CUDA 是底层 GPU 平台；在其上可以手写 CUDA C++ Kernel，也可以使用 CUTLASS C++、CUTLASS Python CuTe DSL 或 Triton 等不同的 Kernel 编写路径" width="960" height="380"><figcaption>图 1 · 几种编写 GPU Kernel 的路径。本站依据 <a href="https://github.com/NVIDIA/cutlass" target="_blank" rel="noopener noreferrer">CUTLASS 项目总览</a>、<a href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/overview.html" target="_blank" rel="noopener noreferrer">CUTLASS Python Overview</a> 与 <a href="https://triton-lang.org/" target="_blank" rel="noopener noreferrer">Triton 文档</a> 绘制；这是概念对照，不表示软件的编译链完全相同。</figcaption></figure>
+            </section>
+            <section id="why-gemm">
+              <h3>为什么从 GEMM 出发</h3>
+              <p>GEMM（General Matrix Multiplication）通常写作 <code>D = αAB + βC</code>。矩阵乘法表面上只有乘加，但要跑得快，必须同时回答几件事：输出矩阵如何切给线程块？A、B 的子块怎样从全局内存进入更近的存储？哪些线程持有哪个元素？怎样调用合适的矩阵乘加指令？算完后如何把结果高效写回？</p>
+              <p>这些问题相互牵制。例如，更大的 tile 可增加数据复用，却可能消耗更多共享内存和寄存器；数据类型、矩阵形状、GPU 架构与输出融合操作也会改变合适的配置。CUTLASS 的价值在于把这些选择明确表达出来，并提供可复用的实现与调优入口。<a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html" target="_blank" rel="noopener noreferrer">官方 Efficient GEMM in CUDA</a> 用分层循环解释了这种设计。</p>
+            </section>
+            <section id="tiling">
+              <h3>一张图看懂分块与数据流</h3>
+              <p>先把输出 D 沿 M、N 维划成许多 tile，让不同线程块或线程块簇处理不同区域。负责一个输出 tile 的计算单元再沿 K 维逐块读取 A 和 B，执行乘加并累积。输入 tile 可以先从全局内存搬到共享内存，再由参与计算的线程取用；累积结果最后经过 <strong>epilogue（收尾阶段）</strong> 写到输出，还可以顺手做缩放或逐元素操作。</p>
+              <figure class="cutlass-figure"><img src="../../assets/cutlass-gemm-flow.svg" alt="矩阵 A 和 B 按输出 tile 与 K tile 分块；A 和 B 的数据从全局内存进入共享内存，再参与矩阵乘加；累积结果经 epilogue 写入输出矩阵 D" width="960" height="510"><figcaption>图 2 · GEMM 的概念性分块与搬运路径。本站依据 <a href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html" target="_blank" rel="noopener noreferrer">Efficient GEMM in CUDA</a> 与 <a href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api_3x.html" target="_blank" rel="noopener noreferrer">CUTLASS 3.x GEMM API</a> 绘制。具体缓存、计算粒度和指令随架构与 Kernel 方案变化。</figcaption></figure>
+              <div class="table-scroll"><table><thead><tr><th>步骤</th><th>解决的问题</th><th>常见对应概念</th></tr></thead><tbody>
+                <tr><td>切分输出</td><td>把 M × N 的结果分配给并行的计算单元</td><td>tile、grid、thread block / cluster</td></tr>
+                <tr><td>搬运输入</td><td>把 A、B 的 K 子块带到计算附近并复用</td><td>global memory、shared memory、copy</td></tr>
+                <tr><td>执行乘加</td><td>将子块乘积累加为输出 tile</td><td>MMA、Tensor Core 或 SIMT 路径</td></tr>
+                <tr><td>写回输出</td><td>变换、融合并存储结果</td><td>epilogue</td></tr>
+              </tbody></table></div>
+              <p>可以把 <strong>tiling</strong> 理解为“把大问题切成适合 GPU 并行和局部存储的小块”，把 <strong>pipeline</strong> 理解为“安排搬运与计算尽量重叠”。它们是理解 CUTLASS 性能设计的两条主线，但并不保证任意配置都会更快；实际仍要按目标形状和设备测量。</p>
+            </section>
+            <section id="inside">
+              <h3>CUTLASS 里有什么</h3>
+              <p>读官方仓库时，先区分两层：<strong>CUTLASS 是整个项目</strong>，<strong>CuTe 是其中描述布局、张量、数据搬运与矩阵乘加的一套核心抽象</strong>。CuTe 的 <code>Layout</code> 关注逻辑坐标如何映射到数据位置或线程，<code>Tensor</code> 则把数据访问与布局结合起来。这让“哪个线程负责哪个元素”成为可以直接表达和推理的对象。</p>
+              <p>在 CUTLASS 3.x 的 C++ GEMM API 中，官方按 <strong>Device → Kernel → Collective → Tiled MMA/Copy → Atom</strong> 介绍层次：外层封装调用与调度，中间组合 mainloop 和 epilogue，内层描述如何分块搬运和执行指令。初学时不必记住每个模板名，先看出“调用接口、组织一个 Kernel、完成数据流、落到硬件操作”即可。CUTLASS Python / CuTe DSL 则让作者用 Python 语法表达类似的布局与操作，同时保留对内存和线程组织的显式控制。</p>
+              <div class="callout"><span class="callout-title">容易混淆的名字</span><p><strong>CuTe 不是 CUDA 的替代品。</strong>它是 CUTLASS 的布局与张量等组合抽象；<strong>CuTe DSL</strong> 是在 CUTLASS Python 中使用这些概念写 Kernel 的路径。传统 CUTLASS C++ 与 CuTe DSL 都属于 CUTLASS 生态，但语言和开发流程不同。</p></div>
+            </section>
+            <section id="compare">
+              <h3>和 CUDA、Triton 放在一起看</h3>
+              <p>这三者不在同一个抽象层级，因此更适合按“写 Kernel 时主要由谁负责什么”来比较。CUDA 是基础平台与编程模型；CUTLASS 和 Triton 都可以用来构建运行于 GPU 的 Kernel。CUTLASS 的 C++ 路径与 CuTe DSL 路径差异也很大，不能只用“C++ 对 Python”概括。</p>
+              <div class="table-scroll"><table><thead><tr><th>路径</th><th>主要编写视角</th><th>自己重点处理的事</th><th>典型起点</th></tr></thead><tbody>
+                <tr><td>CUDA C++</td><td>线程、线程块、内存和 Kernel</td><td>直接组织索引、协作、搬运和计算</td><td>想掌握底层执行模型或写通用 Kernel</td></tr>
+                <tr><td>CUTLASS C++</td><td>组合 GEMM / 相关算子的模板部件</td><td>选数据类型、tile、调度、mainloop 和 epilogue</td><td>为 NVIDIA GPU 构建可定制的高性能线性代数 Kernel</td></tr>
+                <tr><td>CUTLASS Python / CuTe DSL</td><td>用 Python 语法显式描述布局、搬运和计算</td><td>映射线程与数据，安排存储层次和流水线</td><td>想用 Python 编写并精细控制 NVIDIA GPU Kernel</td></tr>
+                <tr><td>Triton</td><td>Python 中的块级张量程序</td><td>定义每个 program 处理的数据块与运算，再调优配置</td><td>快速迭代自定义深度学习 Kernel</td></tr>
+              </tbody></table></div>
+              <p>例如写矩阵乘法：裸 CUDA C++ 需要自己搭起从分块到写回的完整逻辑；CUTLASS C++ 可组合现成的 GEMM 结构并指定关键策略；CuTe DSL 把布局和数据移动直接放进 Python Kernel；Triton 常从“一个 program 计算一个输出 tile”的角度书写，让编译器处理更多布局与底层资源决策。两条 Python 路径都能做精细优化，具体能控制什么要看所用 API 与版本。</p>
+              <p>这里的“易写”“更快”都没有固定赢家：不同矩阵形状、数据类型、GPU 世代和调优投入会改变结果。<a class="inline-link" href="https://triton-lang.org/" target="_blank" rel="noopener noreferrer">Triton 官方文档</a>把它定义为并行编程语言与编译器；<a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/overview.html" target="_blank" rel="noopener noreferrer">CUTLASS Python Overview</a>强调显式控制 GPU 的内存、线程和数据层次。</p>
+            </section>
+            <section id="when">
+              <h3>什么时候值得用 CUTLASS</h3>
+              <ul>
+                <li>需求以 GEMM 或相近的密集线性代数为中心，需要针对形状、精度、布局或输出融合做定制。</li>
+                <li>想复用 NVIDIA 已实现的分块、搬运和指令级部件，再针对自己的计算调整某一环。</li>
+                <li>希望系统学习高性能 GPU Kernel 如何安排数据移动、Tensor Core 计算与流水线。</li>
+              </ul>
+              <p>如果只需要调用标准矩阵乘法，先使用已有的高层库通常更直接；如果是在学习通用 GPU 线程模型，先写 CUDA 小 Kernel 更容易建立基础；如果要快速尝试自定义块级算子，Triton 也是自然的起点。CUTLASS 最适合的问题是：<strong>标准算子不够贴合需求，而你又希望复用成熟的低层计算结构。</strong></p>
+            </section>
+            <section id="reading">
+              <h3>接下来怎么读</h3>
+              <ol>
+                <li>先读 <a class="inline-link" href="https://github.com/NVIDIA/cutlass" target="_blank" rel="noopener noreferrer">CUTLASS 仓库总览</a>，知道项目包含 C++、CuTe、Python DSL、示例和工具。</li>
+                <li>读 <a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html" target="_blank" rel="noopener noreferrer">Efficient GEMM in CUDA</a>，沿着输出分块、数据搬运、MMA 和 epilogue 再走一遍。</li>
+                <li>选择一条实践路线：<a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/quickstart.html" target="_blank" rel="noopener noreferrer">C++ Quickstart</a>，或 <a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/quick_start.html" target="_blank" rel="noopener noreferrer">CUTLASS Python Quick Start</a>。</li>
+                <li>遇到布局问题，再看 <a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x_design.html" target="_blank" rel="noopener noreferrer">CUTLASS 3.x Design</a> 和 <a class="inline-link" href="https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/01_layout.html" target="_blank" rel="noopener noreferrer">CuTe Layouts</a>。</li>
+              </ol>
+              <p class="source-note">资料核对时间：2026 年 10 月。本文示意图依据官方文档重新绘制，用于解释概念，不代表某个具体架构的精确硬件布线。</p>
+            </section>
+            <div class="reader-actions"><a href="index.html">← 返回 CUTLASS 专题</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

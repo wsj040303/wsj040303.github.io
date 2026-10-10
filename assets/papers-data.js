@@ -8,6 +8,16 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions",
+    shortName: "Tensor Comprehensions / TC",
+    aliases: ["张量理解", "算子自动调优", "张量编译器"],
+    category: "compiler",
+    year: "2018",
+    summary: "从张量表达式、多面体 GPU 编译和实测调优入手，建立算子自动调优的基础概念。",
+    articleUrl: "tensor-comprehensions/",
+    url: "https://arxiv.org/abs/1802.04730"
+  },
+  {
     title: "Efficient Memory Management for Large Language Model Serving with PagedAttention",
     shortName: "vLLM / PagedAttention",
     aliases: ["大模型推理显存管理"],

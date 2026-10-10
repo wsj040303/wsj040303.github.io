@@ -81,6 +81,8 @@
 .paper-sample { color: var(--soft); font-size: 11px; }
 .paper-link { flex-shrink: 0; padding-bottom: 3px; border-bottom: 1px solid #68a067; color: #246d3e; font-size: 13px; font-weight: 700; }
 .paper-link:hover { color: #124a2d; border-color: #124a2d; }
+.paper-source-link { margin-left: auto; color: #547360; font-size: 12px; white-space: nowrap; }
+.paper-source-link:hover { color: #124a2d; text-decoration: underline; }
 .paper-empty { padding: 65px 20px; border: 1px dashed #b9d3ac; border-radius: 16px; background: #f4f8ed; text-align: center; }
 .paper-empty h2 { margin: 0 0 10px; color: var(--forest); font-size: 22px; }
 .paper-empty p { margin: 0 0 22px; color: var(--muted); font-size: 14px; }

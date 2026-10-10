@@ -1,0 +1,38 @@
+.article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
+.reader-heading h1 { font-size: clamp(36px, 3.7vw, 52px); letter-spacing: -.04em; }
+.chapter-panel { max-height: 100vh; overflow-y: auto; }
+.paper-article .paper-intro { margin-bottom: 34px; }
+.paper-article .paper-intro p { margin: 0; color: #354f3c; font-size: 14px; line-height: 1.9; }
+.paper-article .paper-figure {
+  margin: 23px 0 26px;
+  overflow: hidden;
+  border: 1px solid #cbdcc4;
+  border-radius: 14px;
+  background: #fff;
+}
+.paper-article .paper-figure > a { display: block; overflow-x: auto; border: 0; }
+.paper-article .paper-figure img { display: block; width: 100%; min-width: 700px; height: auto; }
+.paper-article .paper-figure img[src*="figure-3"] { min-width: 1050px; }
+.paper-article .paper-figure figcaption {
+  padding: 12px 16px 14px;
+  border-top: 1px solid #d8e5cf;
+  color: #496553;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.paper-article .paper-figure figcaption a { color: #236c40; text-decoration: underline; text-underline-offset: 3px; }
+.paper-article .paper-figure figcaption a:hover { color: #144f30; }
+.paper-article .formula { max-width: 100%; }
+.paper-article strong { color: #1d5937; }
+
+@media (max-width: 650px) {
+  .chapter-panel { max-height: none; }
+  .paper-article .paper-figure { margin-inline: -8px; }
+  .paper-article .paper-figure::after {
+    content: "← 横向滑动查看图片；点击可放大 →";
+    display: block;
+    padding: 0 16px 12px;
+    color: #647c68;
+    font-size: 11px;
+  }
+}

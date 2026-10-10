@@ -55,10 +55,17 @@ if (paperSearch && paperList) {
     const footer = document.createElement("div");
     footer.className = "paper-card-footer";
     if (paper.sample) addText(footer, "span", "paper-sample", "示例条目");
-    const link = addText(footer, "a", "paper-link", "查看论文 ↗");
-    link.href = paper.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
+    const link = addText(footer, "a", "paper-link", paper.articleUrl ? "阅读报告 →" : "查看论文 ↗");
+    link.href = paper.articleUrl || paper.url;
+    if (paper.articleUrl && paper.url) {
+      const source = addText(footer, "a", "paper-source-link", "论文原文 ↗");
+      source.href = paper.url;
+      source.target = "_blank";
+      source.rel = "noopener noreferrer";
+    } else {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
     card.append(footer);
     return card;
   };

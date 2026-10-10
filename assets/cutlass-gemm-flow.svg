@@ -7,7 +7,7 @@
     <pattern id="tiles" width="45" height="38" patternUnits="userSpaceOnUse"><path d="M45 0H0V38" fill="none" stroke="#a6c49b" stroke-width="1.5"/></pattern>
   </defs>
   <rect width="960" height="510" fill="#f4f8ed"/>
-  <text class="title" x="34" y="37">GEMM：一个输出 tile 怎样产生</text>
+  <text class="title" x="34" y="37">GEMM 输出 tile 的计算与写回</text>
   <text class="note" x="34" y="61">D = αAB + βC；图示突出 A、B 的乘加主路径</text>
   <rect x="35" y="91" width="890" height="142" rx="16" fill="#e9f1e2" stroke="#abc79f" stroke-width="2"/>
   <text class="head" x="55" y="122">① 输出矩阵按 M × N 切块</text>

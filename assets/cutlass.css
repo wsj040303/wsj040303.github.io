@@ -10,3 +10,4 @@
   .cutlass-article .cutlass-figure { margin-inline: -8px; }
   .cutlass-article .cutlass-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
 }
+.cutlass-article section h2 { margin: 0 0 13px; padding-left: 14px; border-left: 5px solid #83b763; color: var(--forest); font-size: 21px; letter-spacing: -.03em; }

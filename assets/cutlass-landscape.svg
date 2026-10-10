@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" role="img" aria-labelledby="title desc">
   <title id="title">CUDA、CUTLASS 与 Triton 的关系</title>
-  <desc id="desc">四种 Kernel 编写路径并列：CUDA C++、CUTLASS C++、CUTLASS Python CuTe DSL、Triton。它们最终运行在 GPU 上，CUDA 是 NVIDIA GPU 的基础平台。</desc>
+  <desc id="desc">四种 Kernel 编写路径并列：CUDA C++、CUTLASS C++、CUTLASS Python CuTe DSL、Triton。本图以 NVIDIA GPU 为目标，CUDA 提供基础平台和执行模型。</desc>
   <defs>
     <style>.title{font:700 19px Arial,'Microsoft YaHei',sans-serif;fill:#194e33}.label{font:700 17px Arial,'Microsoft YaHei',sans-serif;fill:#214d35}.small{font:14px Arial,'Microsoft YaHei',sans-serif;fill:#42634b}.base{font:700 18px Arial,'Microsoft YaHei',sans-serif;fill:#fffdf7}</style>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 9 5 1 9" fill="none" stroke="#37764e" stroke-width="2"/></marker>
   </defs>
   <rect width="960" height="380" fill="#f4f8ed"/>
-  <text class="title" x="35" y="38">从“写 Kernel”到“在 GPU 执行”</text>
-  <text class="small" x="35" y="65">上层是不同的编写与复用方式；下层是共同依赖的 NVIDIA GPU 执行环境</text>
+  <text class="title" x="35" y="38">NVIDIA GPU 上的 Kernel 编写方式</text>
+  <text class="small" x="35" y="65">上层列出编写方式；箭头指向以 NVIDIA GPU 为目标的执行环境</text>
   <g stroke-width="2">
     <rect x="35" y="93" width="210" height="153" rx="14" fill="#e0ecda" stroke="#9bbe91"/>
     <rect x="262" y="93" width="210" height="153" rx="14" fill="#e8eed6" stroke="#9bbe91"/>
@@ -18,7 +18,7 @@
   <text class="small" x="53" y="159">直接编写线程与 Kernel</text>
   <text class="small" x="53" y="184">手动组织访存和协作</text>
   <text class="label" x="280" y="129">CUTLASS C++</text>
-  <text class="small" x="280" y="159">组合 GEMM 等算子部件</text>
+  <text class="small" x="280" y="159">组合 GEMM 等实现组件</text>
   <text class="small" x="280" y="184">选择 tile 与计算策略</text>
   <text class="label" x="507" y="129">CuTe DSL</text>
   <text class="small" x="507" y="159">CUTLASS Python 路径</text>

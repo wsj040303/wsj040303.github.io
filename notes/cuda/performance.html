@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CUDA 性能测试与调优：确定计时范围、用 CUDA Event 建立基线、用 Nsight Systems 和 Nsight Compute 定位瓶颈，并以实测访存对照验证优化。">
+    <meta name="theme-color" content="#0b2015">
+    <title>CUDA 性能测试与调优 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/cuda.css">
+    <script src="../../assets/cuda-toc.js" defer></script>
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../../ai-infra/">AI Infra</a><span>/</span><a href="index.html">CUDA</a><span>/</span>CUDA 性能测试与调优</nav>
+        <div class="reader-heading"><h1>CUDA 性能测试与调优</h1></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open>
+              <summary>章节目录</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list" data-recursive-toc>
+                <li><a href="#scope">测试目标与计时范围</a></li>
+                <li><a href="#baseline">正确性与基线测量</a></li>
+                <li><a href="#system">程序级时间线</a></li>
+                <li><a href="#kernel">Kernel 指标分析</a></li>
+                <li><a href="#experiment">访存映射实测</a></li>
+                <li><a href="#loop">调优迭代</a></li>
+                <li><a href="#conclusion">结论</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content cuda-article">
+            <section id="scope">
+              <h3>测试目标与计时范围</h3>
+              <p>CUDA 性能测试先固定一个工作负载，再比较同一工作负载下的实现。工作负载至少包括输入形状、数据类型、内存布局、数值范围和正确性标准；测试记录还应包含 GPU 型号、驱动、CUDA Toolkit、编译选项、线程块配置、热身次数与统计方法。不同输入规模可能使同一算子分别受启动开销、缓存或显存访问限制，因此单个尺寸的结果只适用于对应场景。</p>
+              <p><strong>端到端耗时</strong>从调用方开始执行到结果可用为止，包含必要的数据传输、分配、启动与同步；<strong>Kernel 耗时</strong>只覆盖 GPU 上指定 Kernel 的执行区间。两者回答不同的问题：前者判断程序对用户是否变快，后者解释设备端代码的变化。Host 发起 Kernel 启动后可能立即继续执行，因此用 CPU 时钟围住启动语句时，须在结束计时前同步；CUDA Event 则适合测量同一 Stream 中排入的 GPU 工作。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#timing" target="_blank" rel="noopener noreferrer">CUDA C++ Best Practices Guide · Timing</a>。</p>
+              <p>当算子已嵌入应用，先记录端到端时间，再分解 Kernel、复制和 CPU 侧间隙。单独的 Kernel 变快，不保证包含分配、传输与调度的路径也按相同比例变快。独立 microbenchmark 则要明确输入是否已驻留设备，以及每次重复是否复用同一块数据；缓存状态会改变测得的内存性能。</p>
+            </section>
+            <section id="baseline">
+              <h3>正确性与基线测量</h3>
+              <p>在计时前，先用参考结果校验所有输出，包括非整除线程块的尾部输入和生产环境会遇到的边界形状。每次启动后检查 <code>cudaGetLastError()</code>，并在需要结果时同步以捕获执行期错误。性能版本与基线版本应采用相同的输入、输出、精度要求和计时范围；浮点归约若改变求和顺序，需要按业务误差要求比较。</p>
+              <p>CUDA Event 记录到 Stream 中；等待结束 Event 后，<code>cudaEventElapsedTime</code> 返回两次记录之间的<strong>毫秒</strong>。以下片段用 Event 围住一次 Kernel 启动，并将结果换算成微秒；完整的分配、热身、重复测量和校验见<a class="inline-link" href="../examples/cuda_perf_bench.cu" download>可下载的 CUDA C++ 示例</a>。Event 与被测 Kernel 必须排入同一 Stream。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-runtime-api/cuda_runtime_api/group__CUDART__EVENT.html" target="_blank" rel="noopener noreferrer">CUDA Runtime API · Event Management</a>。</p>
+              <figure class="code-block"><figcaption><span>单次 Kernel 的 CUDA Event 计时</span><span class="code-lang">CUDA C++</span></figcaption><pre><code>cudaEventRecord(start, stream);
+kernel&lt;&lt;&lt;grid, block, 0, stream&gt;&gt;&gt;(args...);
+cudaEventRecord(stop, stream);
+cudaEventSynchronize(stop);
+float milliseconds = 0;
+cudaEventElapsedTime(&amp;milliseconds, start, stop);
+float microseconds = milliseconds * 1000.0f;</code></pre></figure>
+              <p>先完成数次不计入统计的热身，再采集多次结果，报告中位数和多次独立运行的范围。热身使初始化和编译加载等一次性工作退出被测区间；逐次同步便于得到每次 Kernel 的时间。运行时应尽量避免其他 GPU 任务争用资源，并保持两个版本的测量顺序与条件一致。对微秒级 Kernel，Event、启动和调度开销可能与执行时间同量级，此时还需要测量完整调用路径。</p>
+              <p>带宽受限候选算子可计算<strong>算法有效带宽</strong>：<code>(按算法计的读字节数 + 写字节数) / Kernel 秒数</code>，单位为 GB/s 时除以 <code>10<sup>9</sup></code>。这个值来自算法访问量与时间，并非硬件计数器测得的 DRAM 流量；数据命中缓存时，两者尤其不能直接等同。理论带宽、有效带宽及单位口径见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#bandwidth" target="_blank" rel="noopener noreferrer">CUDA C++ Best Practices Guide · Bandwidth</a>。</p>
+            </section>
+            <section id="system">
+              <h3>程序级时间线</h3>
+              <p><strong>Nsight Systems（<code>nsys</code>）</strong>记录 CUDA API、Kernel 和内存复制的时间线。它适合先定位程序花时间的位置：若 CPU 侧频繁分配或同步、Kernel 之间有较长空隙、传输与计算没有预期的重叠，应先检查调用路径。汇总表显示总量，时间线显示先后与重叠关系；只把不同类别的汇总时间相加，不能还原端到端墙钟时间。命令与统计报告见 <a class="inline-link" href="https://docs.nvidia.com/nsight-systems/UserGuide/#example-stats-command-sequences" target="_blank" rel="noopener noreferrer">Nsight Systems User Guide · Stats</a>。</p>
+              <figure class="code-block"><figcaption><span>采集程序时间线与 CUDA 汇总</span><span class="code-lang">Shell</span></figcaption><pre><code>nsys profile --trace=cuda --sample=none --cpuctxsw=none \
+  --stats=true -o /tmp/cuda_perf_profile ./cuda_perf_bench
+nsys stats --report cuda_gpu_trace /tmp/cuda_perf_profile.sqlite</code></pre></figure>
+              <p>在本文示例的一次采集中，<code>cuda_gpu_kern_sum</code> 分别汇总了两个 Kernel 的 26 次启动；<code>cuda_api_sum</code> 同时显示了内存分配、复制与 Event 同步。这些值用于判断工作发生的位置。最终性能比较仍采用未启用分析器时的基线，因为采集本身会改变执行环境。</p>
+            </section>
+            <section id="kernel">
+              <h3>Kernel 指标分析</h3>
+              <p><strong>Nsight Compute（<code>ncu</code>）</strong>分析被选中的 Kernel。先用 <code>SpeedOfLight</code> 查看计算、DRAM、L1/TEX 和 L2 等部件的吞吐，再按怀疑点采集 <code>MemoryWorkloadAnalysis</code>、<code>LaunchStats</code> 或 <code>WarpStateStats</code>。指标需要结合输入规模和访存路径解释：高 DRAM 吞吐可说明显存通路接近当前采集条件下的峰值；低 DRAM 吞吐也可能是数据命中 L2、访存不合并、并行度不足或其他资源限制。Occupancy 是活跃 Warp 比例，增加 Occupancy 不必然提高性能。参见 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/ProfilingGuide/" target="_blank" rel="noopener noreferrer">Nsight Compute Profiling Guide</a> 和 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#occupancy" target="_blank" rel="noopener noreferrer">CUDA C++ Best Practices Guide · Occupancy</a>。</p>
+              <figure class="code-block"><figcaption><span>只采一个热身后的目标 Kernel</span><span class="code-lang">Shell</span></figcaption><pre><code>ncu --section SpeedOfLight --section MemoryWorkloadAnalysis \
+  -k regex:coalesced_add -s 6 -c 1 ./cuda_perf_bench
+ncu --list-sections
+ncu --query-metrics</code></pre></figure>
+              <p>需要验证全局内存访问是否合并时，可比较 L1/TEX 全局加载的 <code>sectors / requests</code>。下面命令只采加载请求数和 sector 数；将 Kernel 名改为 <code>strided_add</code> 可得到对照。指标名称应先用当前版本的 <code>ncu --query-metrics</code> 核对。</p>
+              <figure class="code-block"><figcaption><span>全局加载请求与 sector 数</span><span class="code-lang">Shell</span></figcaption><pre><code>ncu --metrics l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum,\
+l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum \
+  -k regex:coalesced_add -s 6 -c 1 ./cuda_perf_bench</code></pre></figure>
+              <p>示例程序先做一次正确性启动，再热身 5 次；<code>-s 6</code> 跳过这些同名启动，<code>-c 1</code> 只采下一次。采集复杂指标时，<code>ncu</code> 可能重放 Kernel，并按自身的时钟、缓存和串行化设置运行；采集范围和过滤参数见 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/NsightComputeCli/" target="_blank" rel="noopener noreferrer">Nsight Compute CLI 手册</a>。因此，<code>ncu</code> 报告中的 Duration 和分析器内打印的 Event 时间用于诊断，不作为未插桩版本的加速比。参见 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/ProfilingGuide/#workload-durations" target="_blank" rel="noopener noreferrer">Nsight Compute Profiling Guide · Workload Durations</a>。</p>
+            </section>
+            <section id="experiment">
+              <h3>访存映射实测</h3>
+              <p>实验保持计算和启动配置相同，只改变线程与元素的对应关系。连续版本的一个 Warp 处理相邻下标；跨步版本的相邻线程访问相隔 <code>gridDim.x</code> 个 <code>float</code> 的地址。两者都完整覆盖输入，并已逐元素校验输出。按照 CUDA 的全局内存合并访问规则，连续地址通常需要更少的内存事务；跨步版本用于隔离这种映射的代价。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#coalesced-access-to-global-memory" target="_blank" rel="noopener noreferrer">CUDA C++ Best Practices Guide · Coalesced Access</a>。</p>
+              <figure class="code-block"><figcaption><span>两个版本的唯一设计差异</span><span class="code-lang">CUDA C++</span></figcaption><pre><code>// 连续版本：同一 Warp 的 lane 访问相邻元素
+int i = blockIdx.x * blockDim.x + threadIdx.x;
+// 跨步版本：同一 Warp 的 lane 相隔 gridDim.x 个元素
+int i = threadIdx.x * gridDim.x + blockIdx.x;
+if (i &lt; n) c[i] = a[i] + b[i];</code></pre></figure>
+              <p>本机为 NVIDIA GeForce RTX 5070（计算能力 12.0，驱动 595.91.07），使用 CUDA Toolkit 13.4 的 <code>nvcc -O3 -std=c++17 -arch=sm_120</code> 编译；分析工具分别为 Nsight Systems 2026.3.2 和 Nsight Compute 2026.3.1。输入为 16,777,216 个 <code>float</code>，每个数组 64 MiB，两个输入和一个输出合计 192 MiB；Block 为 256 线程。每个版本先热身 5 次，再以 Event 计时 20 次并取中位数。下表给出三次独立、未启用分析器的运行范围；运行期间未手动锁定 GPU 时钟。</p>
+              <div class="table-scroll"><table><thead><tr><th scope="col">线程映射</th><th scope="col">Kernel 时间中位数范围</th><th scope="col">算法有效带宽范围</th></tr></thead><tbody>
+                <tr><th scope="row">连续访问</th><td>335.4–335.6 µs</td><td>599.9–600.2 GB/s</td></tr>
+                <tr><th scope="row">跨步访问</th><td>894.0–896.1 µs</td><td>224.7–225.2 GB/s</td></tr>
+              </tbody></table></div>
+              <p>每个元素读取两个 4 字节输入并写入一个 4 字节输出，因此算法访问量为 <code>16,777,216 × 12 = 201,326,592</code> 字节。以 335.6 µs 为例，有效带宽约为 <code>201,326,592 / 335.6 µs = 599.9 GB/s</code>。连续版本在这组条件下约快 2.66 倍。单次 <code>ncu</code> 采集中，两个版本的全局加载请求数都为 1,048,576，但连续版产生 4,194,304 个 L1 sector（每请求 4 个），跨步版产生 33,554,432 个（每请求 32 个）。这直接支持了访问映射改变内存请求效率的判断。两次采集中的连续版 DRAM Throughput 为 91.70%，跨步版 L2 Cache Throughput 为 87.99%；这些百分比属于分析器条件下的诊断指标，不能替代上表的时间比较，也不能由 sector 比例直接推算耗时比例。</p>
+              <p>在具备 NVIDIA GPU 与 CUDA Toolkit 的 Linux 环境中，可下载<a class="inline-link" href="../examples/cuda_perf_bench.cu" download>完整示例</a>并从其所在目录运行以下命令。<code>sm_120</code> 对应本机 RTX 5070；其他 GPU 应按其计算能力修改 <code>-arch</code>。程序会先检查两个版本的全部输出，再打印各自的中位数与有效带宽。</p>
+              <figure class="code-block"><figcaption><span>编译与复现</span><span class="code-lang">Shell</span></figcaption><pre><code>nvcc -O3 -std=c++17 -arch=sm_120 cuda_perf_bench.cu -o cuda_perf_bench
+./cuda_perf_bench</code></pre></figure>
+            </section>
+            <section id="loop">
+              <h3>调优迭代</h3>
+              <p>调优按“正确性 → 未插桩基线 → 程序时间线 → 单个 Kernel 指标 → 一项改动 → 同口径复测”循环进行。先用时间线确定开销位置，再从与该位置相关的指标提出具体假设。下表中的动作是待验证的候选方案；每次只改变可解释的一项，并同时记录性能与正确性结果。</p>
+              <div class="table-scroll"><table><thead><tr><th scope="col">观察位置</th><th scope="col">进一步核查</th><th scope="col">候选改动</th></tr></thead><tbody>
+                <tr><th scope="row">程序时间线有大量复制、分配或同步</th><td>核对必要的数据传输次数、API 调用与 Kernel 间隙</td><td>复用设备内存、减少往返传输或不必要的同步，并复测端到端时间</td></tr>
+                <tr><th scope="row">Kernel 内存通路繁忙</th><td>核对相邻线程的地址、全局内存请求及 L1/L2/DRAM 吞吐</td><td>调整线程映射或数据布局；有复用时再评估分块与共享内存</td></tr>
+                <tr><th scope="row">Kernel 发射效率低或等待较多</th><td>结合 <code>LaunchStats</code> 的寄存器与共享内存用量、<code>WarpStateStats</code> 的等待原因</td><td>按实际限制调整 Block、每线程工作量或同步方式</td></tr>
+                <tr><th scope="row">源码改动未产生预期收益</th><td>核对编译后的指令、寄存器数与未插桩时间</td><td>确认编译器是否生成预期访存或计算指令，再调整实现</td></tr>
+              </tbody></table></div>
+              <p><code>WarpStateStats</code> 中的等待分类只有在调度器无法持续发射指令时才应作为主要优化线索；等待计数本身不等于性能损失。若需要核对编译器实际生成的代码，可用 <code>nvcc -Xptxas=-v</code> 查看寄存器与共享内存用量，用 <code>cuobjdump --dump-sass ./cuda_perf_bench</code> 查看设备指令。SASS 是编译产物证据，最终收益仍由正确性与同口径计时决定。参见 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/ProfilingGuide/" target="_blank" rel="noopener noreferrer">Nsight Compute Profiling Guide</a>、<a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/nvcc-compiler-switches.html" target="_blank" rel="noopener noreferrer">nvcc Compiler Switches</a> 与 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-binary-utilities/" target="_blank" rel="noopener noreferrer">CUDA Binary Utilities</a>。</p>
+            </section>
+            <section id="conclusion">
+              <h3>结论</h3>
+              <p>本例的连续访存映射在固定输入上稳定快于跨步映射，说明线程到地址的对应关系是可直接测量的优化对象。这个结果只覆盖向量加法和本文设备、规模与编译配置；移到归约、GEMV 或融合算子时，需要重新建立相同口径的基线并检查其实际数据流。延伸案例可参考本站的<a class="inline-link" href="../operators/reduce.html">归约求和</a>与<a class="inline-link" href="../operators/gemv.html">矩阵向量乘</a>。</p>
+            </section>
+            <div class="reader-actions"><a href="index.html">← 返回 CUDA 专题</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

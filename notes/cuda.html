@@ -128,7 +128,7 @@
 ncu ./vector_add
 ncu --list-sections
 ncu --section MemoryWorkloadAnalysis ./vector_add</code></pre></figure>
-              <p><code>nsys profile</code> 用于观察整体执行时间线；<code>ncu</code> 默认收集基础 Kernel 指标，<code>--section</code> 可针对特定问题收集更多数据。使用 <code>ncu --list-sections</code> 查询当前环境可收集的章节。Windows 下将命令中的 <code>./vector_add</code> 换为 <code>.\vector_add.exe</code>。示例的 1000 个元素用于检查执行流程；研究带宽时应扩大输入并记录设备与测试条件。完整计时方法与指标解释留给独立文章；命令细节见 <a class="inline-link" href="https://docs.nvidia.com/nsight-systems/UserGuide/" target="_blank" rel="noopener noreferrer">Nsight Systems User Guide</a> 和 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/NsightComputeCli/" target="_blank" rel="noopener noreferrer">Nsight Compute CLI Guide</a>。</p>
+              <p><code>nsys profile</code> 用于观察整体执行时间线；<code>ncu</code> 默认收集基础 Kernel 指标，<code>--section</code> 可针对特定问题收集更多数据。使用 <code>ncu --list-sections</code> 查询当前环境可收集的章节。Windows 下将命令中的 <code>./vector_add</code> 换为 <code>.\vector_add.exe</code>。示例的 1000 个元素用于检查执行流程；研究带宽时应扩大输入并记录设备与测试条件。完整计时方法、工具指标解释与访存映射实测见<a class="inline-link" href="cuda/performance.html">CUDA 性能测试与调优</a>；命令细节见 <a class="inline-link" href="https://docs.nvidia.com/nsight-systems/UserGuide/" target="_blank" rel="noopener noreferrer">Nsight Systems User Guide</a> 和 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/NsightComputeCli/" target="_blank" rel="noopener noreferrer">Nsight Compute CLI Guide</a>。</p>
             </section>
             <section id="conclusion">
               <h3>结论</h3>

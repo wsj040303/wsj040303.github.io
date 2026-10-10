@@ -26,5 +26,5 @@
   <text x="395" y="168" fill="#2b6645" font-family="Arial, sans-serif" font-size="15" font-weight="700">② 启动 Kernel</text>
   <path d="M648 242 H315" stroke="#327653" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="395" y="229" fill="#2b6645" font-family="Arial, sans-serif" font-size="15" font-weight="700">③ 复制结果</text>
-  <text x="34" y="317" fill="#57735b" font-family="Arial, sans-serif" font-size="13">图中展示显式 cudaMalloc / cudaMemcpy 流程；统一内存有不同的数据管理方式。</text>
+  <text x="34" y="317" fill="#57735b" font-family="Arial, sans-serif" font-size="13">Host 使用 cudaMalloc 分配设备内存，使用 cudaMemcpy 复制输入和输出。</text>
 </svg>

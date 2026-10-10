@@ -53,56 +53,57 @@
               <h3>CUDA 编程模型</h3>
               <p>CUDA 程序在由 CPU 和 GPU 组成的异构系统中运行。CPU 及其内存称为 <strong>Host（主机）</strong>，GPU 及其内存称为 <strong>Device（设备）</strong>。程序从 Host 代码开始执行；Host 通过 CUDA 运行时 API 分配设备内存、传输数据并启动 GPU 函数。由 Host 启动、在 Device 上执行的函数称为 <strong>Kernel（核函数）</strong>。一次 Kernel 启动会让多个 GPU 线程运行同一函数，线程索引决定各自处理的数据。</p>
               <figure class="cuda-figure"><img src="../assets/cuda-host-device.svg" alt="Host 分配设备内存并传输输入，GPU 执行 Kernel 后将结果写入设备全局内存，Host 再复制结果" width="960" height="340"><figcaption>图 1 · 显式内存管理下的 Host、Device 与 Kernel 关系。依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · Programming Model</a> 绘制。</figcaption></figure>
-              <p>图 1 展示的是使用 <code>cudaMalloc</code> 和 <code>cudaMemcpy</code> 的显式数据传输路径。Kernel 启动通常相对于 Host 线程异步：启动调用返回时，GPU 计算不一定已经完成。需要在 Host 读取结果或判断执行状态时，通过同步操作确认 Kernel 完成。CUDA 还提供统一内存等其他内存管理方式，数据传输路径因此可以不同。</p>
+              <p>图 1 展示使用 <code>cudaMalloc</code> 和 <code>cudaMemcpy</code> 的显式数据传输流程。Kernel 启动后，Host 线程继续执行，GPU 异步处理计算。Host 读取结果前，通过同步操作等待 Kernel 完成。</p>
             </section>
             <section id="execution">
               <h3>CUDA 线程组织</h3>
               <p>CUDA C++ 的启动配置给出 <strong>Grid（网格）</strong> 和 <strong>Block（线程块）</strong> 的尺寸；Grid 包含多个 Block，Block 包含多个 <strong>Thread（线程）</strong>。Block 内的线程在执行时进一步组成 <strong>Warp</strong>。因此，Grid、Block、Thread 是程序指定的组织层次，而 Warp 是理解这些线程如何执行所需的分组概念。</p>
               <figure class="cuda-figure"><img src="../assets/cuda-thread-hierarchy.svg" alt="Grid 包含多个 Block，Block 包含多个 Thread；Block 内线程在执行时分成每组 32 个的 Warp" width="960" height="420"><figcaption>图 2 · CUDA 线程组织与 Warp 执行分组。图中数量仅用于示意；依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · Thread Blocks and Grids、Warps and SIMT</a> 绘制。</figcaption></figure>
               <h4>Grid：一次 Kernel 的线程块集合</h4>
-              <p>一次 Kernel 启动产生一个 Grid。Grid 可以是一维、二维或三维，尺寸由启动配置的第一个参数指定，例如 <code>kernel&lt;&lt;&lt;gridSize, blockSize&gt;&gt;&gt;(...)</code> 中的 <code>gridSize</code>。Grid 的 Block 数量可以超过 GPU 同时能够执行的数量，未能立即执行的 Block 会等待硬件调度。<code>blockIdx</code> 标识 Block 在 Grid 中的位置，<code>gridDim</code> 给出 Grid 在各维的 Block 数。</p>
+              <p>一次 Kernel 启动产生一个 Grid。Grid 可以是一维、二维或三维，尺寸由启动配置的第一个参数指定，例如 <code>kernel&lt;&lt;&lt;gridSize, blockSize&gt;&gt;&gt;(...)</code> 中的 <code>gridSize</code>。Grid 的 Block 数量可以超过 GPU 同时能够执行的数量，其余 Block 排队等待硬件调度。<code>blockIdx</code> 标识 Block 在 Grid 中的位置，<code>gridDim</code> 给出 Grid 在各维的 Block 数。</p>
               <h4>Block：可协作的线程组</h4>
-              <p>Block 的尺寸由启动配置的第二个参数指定；同一个 Grid 中的 Block 具有相同尺寸。线程通过 <code>threadIdx</code> 获取块内索引，通过 <code>blockDim</code> 获取块的尺寸。同一 Block 的线程可使用共享内存交换数据，并用 <code>__syncthreads()</code> 做块内同步。不同 Block 没有固定执行顺序，普通 Kernel 不能依靠 <code>__syncthreads()</code> 完成跨 Block 同步。</p>
+              <p>Block 的尺寸由启动配置的第二个参数指定；同一个 Grid 中的 Block 具有相同尺寸。线程通过 <code>threadIdx</code> 获取块内索引，通过 <code>blockDim</code> 获取块的尺寸。同一 Block 的线程可使用共享内存交换数据，并用 <code>__syncthreads()</code> 做块内同步。GPU 根据资源情况安排不同 Block 的执行顺序；<code>__syncthreads()</code> 的同步范围是当前 Block。</p>
               <p>一维数组通常使用 <code>i = blockIdx.x × blockDim.x + threadIdx.x</code> 计算全局下标。若每个 Block 有 256 个线程，处理 1000 个元素需要 <code>⌈1000 / 256⌉ = 4</code> 个 Block；启动的 1024 个线程中，最后 24 个线程必须在读写前检查 <code>i &lt; 1000</code>。</p>
               <h4>Warp：SIMT 执行分组</h4>
-              <p>以本页后面的向量加法为例，<code>vectorAdd&lt;&lt;&lt;4, 256&gt;&gt;&gt;(...)</code> 表示启动 4 个 Block，每个 Block 有 256 个线程。这两个数字指定的是 Grid 和 Block 的尺寸，代码中不需要再填写 Warp 数量。Block 被分配到 SM 后，SM 按块内连续的线程编号将线程组织成 Warp。<strong>每个 Warp 固定有 32 个 lane</strong>，lane 是线程在 Warp 内的编号，范围为 0～31。对于一维 Block，编号 0～31 的线程属于第一个 Warp，32～63 属于第二个，以此类推。</p>
-              <p>SM 的 Warp 调度器会从已就绪的 Warp 中选择要执行下一条指令的 Warp，并向其中当前参与执行的 lane 发出指令。当一个 Warp 等待数据时，其他已就绪的 Warp 可以继续执行。分支是否让部分 lane 暂时不参与、相邻 lane 的访存地址能否合并，都会影响一次 Warp 指令的有效工作量，因此分析分支和访存时需要以 Warp 为单位观察。调度与划分规则见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-kernel-programming.html" target="_blank" rel="noopener noreferrer">官方 Hardware Multithreading 说明</a>。</p>
-              <p><strong>SIMT（Single-Instruction, Multiple-Threads，单指令多线程）</strong>指一个 Warp 中的线程执行同一份 Kernel 代码，但每个线程保留自己的寄存器状态和数据，并可走不同的控制流。例如，对于一维 Block，条件 <code>(threadIdx.x &amp; 1) == 0</code> 会让相邻线程分别进入奇、偶两条路径。执行某一路径的指令时，不走该路径的 lane 不参与这些指令；另一条路径仍需执行。这种 <strong>Warp 分支发散</strong>可能降低执行单元利用率。详见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">官方 Warps and SIMT 说明</a>。</p>
+              <p>以本页后面的向量加法为例，<code>vectorAdd&lt;&lt;&lt;4, 256&gt;&gt;&gt;(...)</code> 表示启动 4 个 Block，每个 Block 有 256 个线程。Grid 和 Block 的尺寸由这两个参数指定，Warp 则由 SM 根据 Block 中的线程编号自动组成。<strong>每个 Warp 固定有 32 个 lane</strong>，lane 是线程在 Warp 内的编号，范围为 0～31。对于一维 Block，编号 0～31 的线程属于第一个 Warp，32～63 属于第二个，以此类推。</p>
+              <p><strong>SIMT（Single-Instruction, Multiple-Threads，单指令多线程）</strong>描述一个 Warp 中的线程执行同一份 Kernel 代码，并分别处理各自的数据。每个线程保留自己的寄存器状态。</p>
+              <p>同一 Warp 的线程也可以根据条件进入不同分支。例如，对于一维 Block，条件 <code>(threadIdx.x &amp; 1) == 0</code> 会让相邻线程分别进入奇、偶两条路径。GPU 分别处理这些路径，每次由当前路径对应的 lane 执行指令。这种 <strong>Warp 分支发散</strong>可能降低执行单元利用率。详见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">官方 Warps and SIMT 说明</a>。</p>
             </section>
             <section id="hardware">
               <h3>GPU 硬件执行与软件映射</h3>
-              <p>GPU 包含多个 <strong>SM（Streaming Multiprocessor，流式多处理器）</strong>。每个 SM 具有寄存器文件、执行单元及片上数据缓存等资源；设备级 L2 缓存和全局内存由多个 SM 使用。一个 Block 的线程在同一个 SM 上执行；SM 的资源允许时可以同时驻留多个 Block。Block 到 SM 的分配由设备决定，不存在固定的一一对应关系。</p>
-              <figure class="cuda-figure"><img src="../assets/cuda-sm-mapping.svg" alt="Grid 中的逻辑 Block 动态分配到多个物理 SM，每个 SM 可驻留多个 Block；多个 SM 共用设备级缓存和全局内存" width="960" height="460"><figcaption>图 3 · Block 到 SM 的示意映射，虚线不表示固定分配或执行顺序。依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · GPU Hardware Model</a> 绘制。</figcaption></figure>
+              <p>GPU 包含多个 <strong>SM（Streaming Multiprocessor，流式多处理器）</strong>。每个 SM 具有寄存器文件、执行单元及片上数据缓存等资源；设备级 L2 缓存和全局内存由多个 SM 使用。一个 Block 的线程在同一个 SM 上执行；SM 的资源允许时可以同时驻留多个 Block。设备根据各 SM 的可用资源动态分配 Block。</p>
+              <p>SM 的 Warp 调度器从已就绪的 Warp 中选择下一条要执行的指令。当一个 Warp 等待数据时，其他已就绪的 Warp 可以继续执行。调度机制见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-kernel-programming.html" target="_blank" rel="noopener noreferrer">官方 Hardware Multithreading 说明</a>。</p>
+              <figure class="cuda-figure"><img src="../assets/cuda-sm-mapping.svg" alt="Grid 中的逻辑 Block 动态分配到多个物理 SM，每个 SM 可驻留多个 Block；多个 SM 共用设备级缓存和全局内存" width="960" height="460"><figcaption>图 3 · 虚线表示设备将 Block 动态分配到可用 SM，具体执行顺序由设备决定。依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · GPU Hardware Model</a> 绘制。</figcaption></figure>
               <div class="table-scroll"><table><thead><tr><th>软件或执行概念</th><th>相关硬件</th><th>对应关系</th></tr></thead><tbody>
-                <tr><td>Grid</td><td>整块 GPU、多个 SM</td><td>一个 Grid 的 Block 分批分配给可用 SM；Grid 不是独立的物理单元。</td></tr>
+                <tr><td>Grid</td><td>整块 GPU、多个 SM</td><td>Grid 中的 Block 分批分配给 GPU 上的可用 SM。</td></tr>
                 <tr><td>Block</td><td>一个 SM</td><td>一个 Block 的线程在同一个 SM 上执行；一个 SM 可驻留多个 Block。</td></tr>
-                <tr><td>Warp</td><td>SM 的 Warp 调度与执行资源</td><td>Block 内 32 个线程组成一个 Warp；它是执行分组，不对应一组固定的“CUDA Core”。</td></tr>
-                <tr><td>Thread</td><td>SM 上的寄存器与执行资源</td><td>线程持有独立状态；线程与物理计算单元之间没有固定一对一关系。</td></tr>
+                <tr><td>Warp</td><td>SM 的 Warp 调度与执行资源</td><td>SM 调度 Warp，并将其指令送入可用执行单元。</td></tr>
+                <tr><td>Thread</td><td>SM 上的寄存器与执行资源</td><td>线程持有独立状态；执行单元在多个线程之间复用。</td></tr>
               </tbody></table></div>
               <p>表中的 Grid、Block、Warp 和 Thread 描述程序及执行层次，SM、寄存器文件、执行单元和缓存描述硬件资源。可同时驻留的 Block 与 Warp 数量受每个线程使用的寄存器、每个 Block 使用的共享内存、线程数及设备上限共同约束；具体上限随 GPU 架构变化。</p>
             </section>
             <section id="memory">
               <h3>内存空间与数据传输</h3>
-              <p>CUDA 内存空间的主要区别是<strong>可见范围、生命周期和物理位置</strong>。寄存器与局部内存对单个线程私有，共享内存供同一 Block 的线程使用，全局内存可由设备上的多个 Block 访问。作用范围与存储位置不能混为一谈：局部内存虽然只对单个线程可见，其物理后备位于设备内存。</p>
-              <figure class="cuda-figure"><img src="../assets/cuda-memory-hierarchy.svg" alt="线程私有寄存器、Block 共享内存、SM 的 L1 缓存，以及跨 SM 的 L2 缓存和全局内存；局部内存逻辑私有但位于设备内存" width="960" height="520"><figcaption>图 4 · 内存空间与缓存的概念性位置和可见范围。依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方内存类型表</a> 和 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">GPU Memory</a> 绘制；部分架构的 L1 缓存与共享内存使用统一数据缓存中的物理资源。</figcaption></figure>
+              <p>CUDA 内存空间的主要属性是<strong>可见范围、生命周期和物理位置</strong>。寄存器与局部内存对单个线程私有，共享内存供同一 Block 的线程使用，全局内存可由设备上的多个 Block 访问。局部内存的可见范围是单个线程，其数据物理存放在设备内存中。</p>
+              <figure class="cuda-figure"><img src="../assets/cuda-memory-hierarchy.svg" alt="线程私有寄存器、Block 共享内存、SM 的 L1 缓存，以及跨 SM 的 L2 缓存和全局内存；局部内存供单个线程使用，物理存放在设备内存" width="960" height="520"><figcaption>图 4 · 内存空间与缓存的概念性位置和可见范围。依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方内存类型表</a> 和 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">GPU Memory</a> 绘制。</figcaption></figure>
               <div class="table-scroll"><table><thead><tr><th>内存空间</th><th>可见范围</th><th>位置与生命周期</th><th>典型用途</th></tr></thead><tbody>
                 <tr><td>寄存器</td><td>单个线程</td><td>SM；随线程执行</td><td>标量临时值</td></tr>
-                <tr><td>局部内存</td><td>单个线程</td><td>设备内存；随 Kernel 执行</td><td>无法置于寄存器的线程私有数据</td></tr>
+                <tr><td>局部内存</td><td>单个线程</td><td>设备内存；随 Kernel 执行</td><td>线程私有数组与寄存器溢出数据</td></tr>
                 <tr><td>共享内存</td><td>同一 Block</td><td>SM；随 Block 执行</td><td>块内交换与重复使用数据</td></tr>
                 <tr><td>全局内存</td><td>设备线程</td><td>设备内存；分配后直到释放</td><td>输入、输出和大型数组</td></tr>
                 <tr><td>常量内存</td><td>设备线程只读</td><td>设备内存；有专用缓存</td><td>Kernel 执行期间不变的参数</td></tr>
               </tbody></table></div>
-              <p>L1 和 L2 属于硬件缓存，不等同于代码直接分配的共享内存。共享内存由程序显式使用，块内线程交换数据时仍需遵守同步要求。全局内存中的数组可由 <code>cudaMalloc</code> 分配，并通过 <code>cudaMemcpy</code> 在 Host 与 Device 之间复制。相邻线程访问相邻地址通常有利于合并全局内存请求；实际内存事务还取决于访问尺寸、地址分布和缓存行为，详见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方合并访存说明</a>。</p>
+              <p>L1 和 L2 缓存由硬件管理；共享内存由程序显式使用，块内线程交换数据时需遵守同步要求。全局内存中的数组可由 <code>cudaMalloc</code> 分配，并通过 <code>cudaMemcpy</code> 在 Host 与 Device 之间复制。相邻线程访问相邻地址通常有利于合并全局内存请求；合并效果取决于访问尺寸与地址分布，详见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方合并访存说明</a>。</p>
             </section>
             <section id="first-kernel">
               <h3>向量加法 Kernel</h3>
-              <p>向量加法的输入是长度为 <code>n</code> 的数组 <code>a</code>、<code>b</code>，输出满足 <code>c[i] = a[i] + b[i]</code>。各元素之间没有数据依赖，因此一个线程可以负责一个输出下标。Kernel 用全局索引确定元素位置，并在访问设备内存前检查边界。</p>
+              <p>向量加法的输入是长度为 <code>n</code> 的数组 <code>a</code>、<code>b</code>，输出满足 <code>c[i] = a[i] + b[i]</code>。各元素的计算相互独立，因此一个线程可以负责一个输出下标。Kernel 用全局索引确定元素位置，并在访问设备内存前检查边界。</p>
               <figure class="code-block"><figcaption><span>线程索引与边界判断</span><span class="code-lang">CUDA C++</span></figcaption><pre><code>__global__ void vectorAdd(const float* a, const float* b, float* c, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i &lt; n) c[i] = a[i] + b[i];
 }</code></pre></figure>
               <figure class="cuda-figure"><img src="../assets/cuda-index-mapping.svg" alt="1000 个元素分配到四个各含 256 个线程的 Block，最后一个 Block 的 24 个越界线程跳过内存访问" width="960" height="300"><figcaption>图 5 · <code>n = 1000</code>、每个 Block 256 个线程时的下标映射。最后 24 个线程由 <code>i &lt; n</code> 排除。</figcaption></figure>
-              <p><a class="inline-link" href="examples/vector_add.cu" download>完整的 vector_add.cu</a> 包含 Host 端数组初始化、设备内存分配与复制、Kernel 启动、错误检查、结果验证及资源释放。其启动配置为 <code>threadsPerBlock = 256</code>、<code>blocks = (n + 255) / 256</code>。启动后，<code>cudaGetLastError()</code> 检查启动错误；<code>cudaDeviceSynchronize()</code> 等待执行完成，并可报告执行期错误。两种检查承担不同作用，不能仅凭启动检查成功判断计算成功。相关行为见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html" target="_blank" rel="noopener noreferrer">CUDA C++ 官方示例</a>。</p>
+              <p><a class="inline-link" href="examples/vector_add.cu" download>完整的 vector_add.cu</a> 包含 Host 端数组初始化、设备内存分配与复制、Kernel 启动、错误检查、结果验证及资源释放。其启动配置为 <code>threadsPerBlock = 256</code>、<code>blocks = (n + 255) / 256</code>。启动后，<code>cudaGetLastError()</code> 检查启动错误；<code>cudaDeviceSynchronize()</code> 等待执行完成并报告执行期错误。相关行为见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html" target="_blank" rel="noopener noreferrer">CUDA C++ 官方示例</a>。</p>
               <p>具备 NVIDIA GPU 与 CUDA Toolkit 的环境可在下载文件所在目录执行以下命令。示例使用可精确表示的小整数构造输入，因此使用直接相等比较；一般浮点计算应根据误差要求设置容差。</p>
               <figure class="code-block"><figcaption><span>编译与运行</span><span class="code-lang">Shell</span></figcaption><pre><code>nvcc -O2 -std=c++17 vector_add.cu -o vector_add
 ./vector_add
@@ -110,14 +111,14 @@
             </section>
             <section id="optimization">
               <h3>算子优化的常见方向</h3>
-              <p>CUDA 算子优化首先要区分访存、计算、调度等不同瓶颈。向量加法每个元素读取两个 <code>float</code> 并写入一个 <code>float</code>，程序请求的数据量为 <code>12 × n</code> 字节，而计算只有一次加法；在足够大的输入上，内存系统可能成为主要限制。但缓存命中与内存事务会改变实际 DRAM 流量，优化方向仍需根据测量确定。</p>
+              <p>CUDA 算子优化围绕访存、计算和调度三类开销展开。向量加法每个元素读取两个 <code>float</code>、写入一个 <code>float</code>，并执行一次加法。对于较大的输入，访存通常是首先需要检查的开销；可以从全局内存访问是否合并、带宽使用情况入手，再选择优化手段。</p>
               <h4>全局内存访问与数据复用</h4>
-              <p>同一 Warp 的相邻线程访问相邻地址，通常有助于将全局内存请求合并为较少的内存事务。若多个线程反复使用同一批数据，可以先将数据搬入共享内存再复用，减少重复的全局内存访问；搬运和块内同步本身也有成本。向量加法中的各输出彼此独立，通常无需共享内存，不能把“使用共享内存”当成通用优化步骤。相关机制见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">CUDA Programming Guide · Memory Access Patterns</a>。</p>
+              <p>同一 Warp 的相邻线程访问相邻地址，通常有助于将全局内存请求合并为较少的内存事务。共享内存适合多个线程反复使用同一批数据的算子，例如矩阵乘法中的分块计算：线程先从全局内存加载数据，再由同一 Block 的线程在共享内存中复用。向量加法的线程各自读取对应元素并写回结果，直接采用连续的全局内存访问即可。相关机制见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">CUDA Programming Guide · Memory Access Patterns</a>。</p>
               <h4>共享内存 Bank Conflict</h4>
-              <p>共享内存分成多个可并行访问的 <strong>Bank</strong>。同一 Warp 的线程若在一次访问中请求同一 Bank 的不同地址，硬件需要把这些请求拆开处理，形成 <strong>Bank Conflict（存储体冲突）</strong>。例如，按列读取某些二维共享内存数组会让相邻线程访问相隔固定步长的地址，可能集中到同一 Bank；调整数组步长或填充一列可改变映射。多个线程读取同一地址时可广播，不应误判为普通 Bank Conflict。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方 Shared Memory Access Patterns</a>。</p>
+              <p>共享内存分成多个可并行访问的 <strong>Bank</strong>。同一 Warp 的线程若在一次访问中请求同一 Bank 的不同地址，硬件需要把这些请求拆开处理，形成 <strong>Bank Conflict（存储体冲突）</strong>。例如，按列读取某些二维共享内存数组会让相邻线程访问相隔固定步长的地址，可能集中到同一 Bank；调整数组步长或填充一列可改变映射。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方 Shared Memory Access Patterns</a>。</p>
               <h4>向量化访存与指令数量</h4>
-              <p>如果每个线程需要处理多个连续元素，编译器在类型与地址对齐等条件满足时，可能生成更宽的读写指令。例如一次 128 bit 的加载可覆盖 16 字节，而不必发出四次 32 bit 加载；这主要减少访存指令的数量，<strong>不意味着实际传输的字节数一定减少</strong>。更宽的操作还可能增加寄存器占用，并需要处理尾部不足一组的元素，因此应检查生成的指令和实测时间。参见 <a class="inline-link" href="https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/" target="_blank" rel="noopener noreferrer">NVIDIA 向量化访存说明</a>。</p>
-              <p>Block 大小、活跃 Warp 数量和 Warp 内分支发散也会影响执行效率。较高的 Occupancy 有助于隐藏部分延迟，但不保证程序更快；这些选择应与访存和计算瓶颈一起评估。</p>
+              <p>当单个线程连续处理多个元素时，可以使用 <code>float4</code> 等向量类型组织数据。在地址满足对齐要求且编译器生成向量指令时，一条 128 bit 加载指令可读取 4 个 <code>float</code>，减少加载指令的发射次数。可以查看生成的指令并测量 Kernel 时间，评估这种写法在目标算子上的效果。参见 <a class="inline-link" href="https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/" target="_blank" rel="noopener noreferrer">NVIDIA 向量化访存说明</a>。</p>
+              <p>Block 大小、活跃 Warp 数量和 Warp 内分支发散也会影响执行效率。合适的 Block 配置可以让 SM 保持足够多的活跃 Warp，在部分 Warp 等待数据时继续发射其他 Warp 的指令；实际配置可结合分析工具与运行时间评估。</p>
             </section>
             <section id="profiling">
               <h3>性能测试工具概览</h3>
@@ -126,7 +127,7 @@
 ncu ./vector_add
 ncu --list-sections
 ncu --section MemoryWorkloadAnalysis ./vector_add</code></pre></figure>
-              <p><code>nsys profile</code> 用于观察整体执行时间线；<code>ncu</code> 默认收集基础 Kernel 指标，<code>--section</code> 可针对特定问题收集更多数据。不同工具版本和 GPU 支持的指标可能不同，先用 <code>ncu --list-sections</code> 查看可用章节。Windows 下将命令中的 <code>./vector_add</code> 换为 <code>.\vector_add.exe</code>。示例默认只有 1000 个元素，适合检查流程，不宜据此判断带宽或优化收益。完整计时方法与指标解释留给独立文章；命令细节见 <a class="inline-link" href="https://docs.nvidia.com/nsight-systems/UserGuide/" target="_blank" rel="noopener noreferrer">Nsight Systems User Guide</a> 和 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/NsightComputeCli/" target="_blank" rel="noopener noreferrer">Nsight Compute CLI Guide</a>。</p>
+              <p><code>nsys profile</code> 用于观察整体执行时间线；<code>ncu</code> 默认收集基础 Kernel 指标，<code>--section</code> 可针对特定问题收集更多数据。使用 <code>ncu --list-sections</code> 查询当前环境可收集的章节。Windows 下将命令中的 <code>./vector_add</code> 换为 <code>.\vector_add.exe</code>。示例的 1000 个元素用于检查执行流程；研究带宽时应扩大输入并记录设备与测试条件。完整计时方法与指标解释留给独立文章；命令细节见 <a class="inline-link" href="https://docs.nvidia.com/nsight-systems/UserGuide/" target="_blank" rel="noopener noreferrer">Nsight Systems User Guide</a> 和 <a class="inline-link" href="https://docs.nvidia.com/nsight-compute/NsightComputeCli/" target="_blank" rel="noopener noreferrer">Nsight Compute CLI Guide</a>。</p>
             </section>
             <section id="conclusion">
               <h3>结论</h3>

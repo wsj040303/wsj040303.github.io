@@ -29,5 +29,5 @@
   <text x="436" y="319" fill="#174b30" font-family="Arial, sans-serif" font-size="15" font-weight="700">设备级 L2 缓存</text>
   <rect x="420" y="340" width="489" height="30" rx="8" fill="#8bb68c"/>
   <text x="436" y="361" fill="#123d28" font-family="Arial, sans-serif" font-size="15" font-weight="700">设备全局内存 · GPU DRAM</text>
-  <text x="30" y="428" fill="#53705a" font-family="Arial, sans-serif" font-size="13">示意中的 Block 分配仅为举例；实际分配与同时驻留数量取决于设备、资源使用量和调度。</text>
+  <text x="30" y="428" fill="#53705a" font-family="Arial, sans-serif" font-size="13">GPU 按 SM 的可用资源分配 Block；可同时驻留的数量随资源使用情况变化。</text>
 </svg>

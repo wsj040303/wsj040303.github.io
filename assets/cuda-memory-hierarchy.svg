@@ -26,5 +26,5 @@
   <rect x="52" y="378" width="856" height="37" rx="8" fill="#88b38b"/>
   <text x="69" y="404" fill="#123e29" font-family="Arial, sans-serif" font-size="15" font-weight="700">Global Memory · 设备全局内存，所有 Block 可访问</text>
   <rect x="30" y="446" width="900" height="49" rx="10" fill="#fffdf7" stroke="#bad0b3"/>
-  <text x="49" y="475" fill="#405f48" font-family="Arial, sans-serif" font-size="14">Local Memory：仅本线程可见的逻辑空间，通常以设备内存为后备；“local”不代表片上存储。</text>
+  <text x="49" y="475" fill="#405f48" font-family="Arial, sans-serif" font-size="14">Local Memory：仅本线程可见，数据物理存放在设备内存中。</text>
 </svg>

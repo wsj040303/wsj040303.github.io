@@ -46,17 +46,37 @@ if (paperSearch && paperList) {
 
   const makeCard = (paper) => {
     const card = document.createElement("article");
-    card.className = "paper-card";
-    const meta = addText(card, "div", "paper-card-meta", categoryNames.get(paper.category) || "其他");
-    addText(meta, "span", "paper-year", paper.year);
+    card.className = "paper-card is-clickable";
+    const meta = addText(card, "div", "paper-card-meta", "");
+    addText(meta, "span", "paper-card-category", categoryNames.get(paper.category) || "其他");
+    const publication = addText(meta, "span", "paper-publication", "");
+    addText(publication, "span", "paper-year", paper.year);
+    if (paper.venue) addText(publication, "span", "paper-venue", paper.venue);
     addText(card, "h2", "", paper.title);
     if (paper.shortName) addText(card, "p", "paper-short-name", paper.shortName);
+    if (Number.isFinite(paper.rating)) {
+      const score = Math.max(0, Math.min(5, paper.rating));
+      const rating = document.createElement("div");
+      rating.className = "paper-rating";
+      rating.setAttribute("role", "img");
+      rating.setAttribute("aria-label", "重要性：" + score + " / 5 星");
+      addText(rating, "span", "paper-rating-label", "重要性");
+      const stars = addText(rating, "span", "paper-stars", "");
+      stars.setAttribute("aria-hidden", "true");
+      addText(stars, "span", "paper-stars-base", "★★★★★");
+      const fill = addText(stars, "span", "paper-stars-fill", "★★★★★");
+      fill.style.width = String(score / 5 * 100) + "%";
+      const numeric = addText(rating, "span", "paper-rating-score", score + " / 5");
+      numeric.setAttribute("aria-hidden", "true");
+      card.append(rating);
+    }
     if (paper.summary) addText(card, "p", "paper-summary", paper.summary);
     const footer = document.createElement("div");
     footer.className = "paper-card-footer";
     if (paper.sample) addText(footer, "span", "paper-sample", "示例条目");
     const link = addText(footer, "a", "paper-link", paper.articleUrl ? "阅读报告 →" : "查看论文 ↗");
     link.href = paper.articleUrl || paper.url;
+    link.setAttribute("aria-label", (paper.articleUrl ? "阅读报告：" : "查看论文：") + paper.title);
     if (paper.articleUrl && paper.url) {
       const source = addText(footer, "a", "paper-source-link", "论文原文 ↗");
       source.href = paper.url;

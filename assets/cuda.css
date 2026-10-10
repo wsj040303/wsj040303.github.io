@@ -5,7 +5,13 @@
 .cuda-article .cuda-figure figcaption a:hover { color: #144f30; }
 .cuda-article .cuda-sources li { margin-bottom: 10px; }
 .cuda-article strong { color: #1d5937; }
+.chapter-list[data-recursive-toc] { max-height: calc(100vh - 76px); overflow-y: auto; }
+.chapter-list[data-recursive-toc] .chapter-sublist { margin: 0; padding: 0; list-style: none; }
+.chapter-list[data-recursive-toc] a { padding-left: calc(22px + var(--toc-indent, 0px)); }
+.chapter-list[data-recursive-toc] .chapter-sublist a { padding-block: 8px; font-size: 12px; }
+.cuda-article h4[id] { scroll-margin-top: 24px; }
 @media (max-width: 650px) {
+  .chapter-list[data-recursive-toc] { max-height: 65vh; }
   .cuda-article .cuda-figure { margin-inline: -8px; }
   .cuda-article .cuda-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
 }

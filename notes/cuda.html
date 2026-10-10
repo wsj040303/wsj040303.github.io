@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../assets/garden.css">
     <link rel="stylesheet" href="../assets/cuda.css">
+    <script src="../assets/cuda-toc.js" defer></script>
     <script src="../assets/site.js" defer></script>
   </head>
   <body>
@@ -35,7 +36,7 @@
             <details class="chapter-panel" open>
               <summary>章节目录</summary>
               <nav aria-label="CUDA 章节目录">
-                <ol class="chapter-list">
+                <ol class="chapter-list" data-recursive-toc>
                   <li><a href="#overview">CUDA 编程模型</a></li>
                   <li><a href="#execution">CUDA 线程组织</a></li>
                   <li><a href="#hardware">GPU 硬件执行</a></li>
@@ -59,12 +60,12 @@
               <h3>CUDA 线程组织</h3>
               <p>CUDA C++ 的启动配置给出 <strong>Grid（网格）</strong> 和 <strong>Block（线程块）</strong> 的尺寸；Grid 包含多个 Block，Block 包含多个 <strong>Thread（线程）</strong>。Block 内的线程在执行时进一步组成 <strong>Warp</strong>。因此，Grid、Block、Thread 是程序指定的组织层次，而 Warp 是理解这些线程如何执行所需的分组概念。</p>
               <figure class="cuda-figure"><img src="../assets/cuda-thread-hierarchy.svg" alt="Grid 包含多个 Block，Block 包含多个 Thread；Block 内线程在执行时分成每组 32 个的 Warp" width="960" height="420"><figcaption>图 2 · CUDA 线程组织与 Warp 执行分组。图中数量仅用于示意；依据 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · Thread Blocks and Grids、Warps and SIMT</a> 绘制。</figcaption></figure>
-              <h4>Grid：一次 Kernel 的线程块集合</h4>
+              <h4 id="grid">Grid：一次 Kernel 的线程块集合</h4>
               <p>一次 Kernel 启动产生一个 Grid。Grid 可以是一维、二维或三维，尺寸由启动配置的第一个参数指定，例如 <code>kernel&lt;&lt;&lt;gridSize, blockSize&gt;&gt;&gt;(...)</code> 中的 <code>gridSize</code>。Grid 的 Block 数量可以超过 GPU 同时能够执行的数量，其余 Block 排队等待硬件调度。<code>blockIdx</code> 标识 Block 在 Grid 中的位置，<code>gridDim</code> 给出 Grid 在各维的 Block 数。</p>
-              <h4>Block：可协作的线程组</h4>
+              <h4 id="block">Block：可协作的线程组</h4>
               <p>Block 的尺寸由启动配置的第二个参数指定；同一个 Grid 中的 Block 具有相同尺寸。线程通过 <code>threadIdx</code> 获取块内索引，通过 <code>blockDim</code> 获取块的尺寸。同一 Block 的线程可使用共享内存交换数据，并用 <code>__syncthreads()</code> 做块内同步。GPU 根据资源情况安排不同 Block 的执行顺序；<code>__syncthreads()</code> 的同步范围是当前 Block。</p>
               <p>一维数组通常使用 <code>i = blockIdx.x × blockDim.x + threadIdx.x</code> 计算全局下标。若每个 Block 有 256 个线程，处理 1000 个元素需要 <code>⌈1000 / 256⌉ = 4</code> 个 Block；启动的 1024 个线程中，最后 24 个线程必须在读写前检查 <code>i &lt; 1000</code>。</p>
-              <h4>Warp：SIMT 执行分组</h4>
+              <h4 id="warp-simt">Warp：SIMT 执行分组</h4>
               <p>以本页后面的向量加法为例，<code>vectorAdd&lt;&lt;&lt;4, 256&gt;&gt;&gt;(...)</code> 表示启动 4 个 Block，每个 Block 有 256 个线程。Grid 和 Block 的尺寸由这两个参数指定，Warp 则由 SM 根据 Block 中的线程编号自动组成。<strong>每个 Warp 固定有 32 个 lane</strong>，lane 是线程在 Warp 内的编号，范围为 0～31。对于一维 Block，编号 0～31 的线程属于第一个 Warp，32～63 属于第二个，以此类推。</p>
               <p><strong>SIMT（Single-Instruction, Multiple-Threads，单指令多线程）</strong>描述一个 Warp 中的线程执行同一份 Kernel 代码，并分别处理各自的数据。每个线程保留自己的寄存器状态。</p>
               <p>同一 Warp 的线程也可以根据条件进入不同分支。例如，对于一维 Block，条件 <code>(threadIdx.x &amp; 1) == 0</code> 会让相邻线程分别进入奇、偶两条路径。GPU 分别处理这些路径，每次由当前路径对应的 lane 执行指令。这种 <strong>Warp 分支发散</strong>可能降低执行单元利用率。详见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">官方 Warps and SIMT 说明</a>。</p>
@@ -112,11 +113,11 @@
             <section id="optimization">
               <h3>算子优化的常见方向</h3>
               <p>CUDA 算子优化围绕访存、计算和调度三类开销展开。向量加法每个元素读取两个 <code>float</code>、写入一个 <code>float</code>，并执行一次加法。对于较大的输入，访存通常是首先需要检查的开销；可以从全局内存访问是否合并、带宽使用情况入手，再选择优化手段。</p>
-              <h4>全局内存访问与数据复用</h4>
+              <h4 id="global-memory-optimization">全局内存访问与数据复用</h4>
               <p>同一 Warp 的相邻线程访问相邻地址，通常有助于将全局内存请求合并为较少的内存事务。共享内存适合多个线程反复使用同一批数据的算子，例如矩阵乘法中的分块计算：线程先从全局内存加载数据，再由同一 Block 的线程在共享内存中复用。向量加法的线程各自读取对应元素并写回结果，直接采用连续的全局内存访问即可。相关机制见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">CUDA Programming Guide · Memory Access Patterns</a>。</p>
-              <h4>共享内存 Bank Conflict</h4>
+              <h4 id="shared-memory-banks">共享内存 Bank Conflict</h4>
               <p>共享内存分成多个可并行访问的 <strong>Bank</strong>。同一 Warp 的线程若在一次访问中请求同一 Bank 的不同地址，硬件需要把这些请求拆开处理，形成 <strong>Bank Conflict（存储体冲突）</strong>。例如，按列读取某些二维共享内存数组会让相邻线程访问相隔固定步长的地址，可能集中到同一 Bank；调整数组步长或填充一列可改变映射。参见 <a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">官方 Shared Memory Access Patterns</a>。</p>
-              <h4>向量化访存与指令数量</h4>
+              <h4 id="vectorized-memory">向量化访存与指令数量</h4>
               <p>当单个线程连续处理多个元素时，可以使用 <code>float4</code> 等向量类型组织数据。在地址满足对齐要求且编译器生成向量指令时，一条 128 bit 加载指令可读取 4 个 <code>float</code>，减少加载指令的发射次数。可以查看生成的指令并测量 Kernel 时间，评估这种写法在目标算子上的效果。参见 <a class="inline-link" href="https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/" target="_blank" rel="noopener noreferrer">NVIDIA 向量化访存说明</a>。</p>
               <p>Block 大小、活跃 Warp 数量和 Warp 内分支发散也会影响执行效率。合适的 Block 配置可以让 SM 保持足够多的活跃 Warp，在部分 Warp 等待数据时继续发射其他 Warp 的指令；实际配置可结合分析工具与运行时间评估。</p>
             </section>
@@ -132,7 +133,7 @@ ncu --section MemoryWorkloadAnalysis ./vector_add</code></pre></figure>
             <section id="conclusion">
               <h3>结论</h3>
               <p>Grid 与 Block 规定程序的线程组织，Warp 描述 Block 内线程的 SIMT 执行分组，SM 提供实际执行资源。向量加法用线程索引和边界判断连接这些层次。算子优化需要分别检查全局内存事务、共享内存 Bank Conflict、指令数量、并行度和分支行为，再借助 CUDA Event、Nsight Systems 与 Nsight Compute 验证瓶颈和收益。</p>
-              <h4>参考资料</h4>
+              <h4 id="references">参考资料</h4>
               <ul class="cuda-sources">
                 <li><a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · Programming Model</a></li>
                 <li><a class="inline-link" href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" target="_blank" rel="noopener noreferrer">NVIDIA CUDA Programming Guide · Writing SIMT Kernels</a></li>

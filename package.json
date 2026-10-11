@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:tc": "node scripts/render-tc.mjs",
+    "check:tc": "node scripts/render-tc.mjs --check"
+  },
+  "devDependencies": {
+    "marked": "16.4.2"
+  }
+}

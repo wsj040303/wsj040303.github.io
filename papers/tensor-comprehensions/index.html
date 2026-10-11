@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Generated from article.md with npm run build:tc; edit the Markdown source. -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8">
@@ -35,6 +36,7 @@
         <div class="reader-grid">
           <aside class="chapter-sidebar">
             <details class="chapter-panel" open><summary>文章目录</summary><nav aria-label="本文目录"><ol class="chapter-list">
+<!-- TC_TOC_START -->
 <li><a href="#overview">主要工作</a></li>
 <li><a href="#background">研究背景</a></li>
 <li><a href="#problem">问题定义</a></li>
@@ -46,10 +48,12 @@
 <li><a href="#appendix-b">附录 B：多面体模型的最小推导</a></li>
 <li><a href="#appendix-c">附录 C：GPU 性能概念与测量边界</a></li>
 <li><a href="#appendix-d">附录 D：相关研究与继续阅读</a></li>
+<!-- TC_TOC_END -->
             </ol></nav></details>
           </aside>
           <article class="reader-content paper-article">
-            <div class="paper-intro"><p>本文以 Nicolas Vasilache 等人的 2018 年论文 <em>Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions</em>（下称 <strong>TC 论文</strong>）为主线，解释张量算子从数学定义到 GPU 内核的生成过程，以及自动调优在其中解决的问题。预备知识只需要矩阵乘法和基本循环；多面体编译、GPU 存储层次与性能测量在后文分别展开。文中的性能数字均来自论文报告，本文没有重新运行 TC 基准测试。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">英文原文</a>可在线阅读。</p>
+<!-- TC_ARTICLE_START -->
+<div class="paper-intro"><p>本文以 Nicolas Vasilache 等人的 2018 年论文 <em>Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions</em>（下称 <strong>TC 论文</strong>）为主线，解释张量算子从数学定义到 GPU 内核的生成过程，以及自动调优在其中解决的问题。预备知识只需要矩阵乘法和基本循环；多面体编译、GPU 存储层次与性能测量在后文分别展开。文中的性能数字均来自论文报告，本文没有重新运行 TC 基准测试。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">英文原文</a>可在线阅读。</p>
 </div>
 <section id="overview"><h3>主要工作</h3>
 <p>TC 论文处理的是一个具体的工程问题：给定张量算子的数学计算规则和输入形状，自动生成适合目标 NVIDIA GPU 的 CUDA 内核，并通过实际运行时间选择实现。作者提供了三部分：表示张量计算的领域专用语言 Tensor Comprehensions、基于多面体表示的即时编译器，以及保存最快候选内核的自动调优与编译缓存。系统通过 ATen 张量库与当时的 PyTorch、Caffe2 集成；“框架无关”指 TC 的核心编译与运行接口可由不同框架适配，论文实现的代码生成目标仍是 CUDA。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，摘要及 §1.2、§4、§6</a></p>
@@ -73,7 +77,6 @@
 <section id="problem"><h3>问题定义</h3>
 <p>用矩阵乘法建立最小模型。给定形状分别为 M×K 和 K×N 的矩阵 A 与 B，目标是计算</p>
 <div class="formula" role="math" aria-label="C[i,j] = Σ(k=0,…,K−1) A[i,k] × B[k,j],  0 ≤ i &lt; M,  0 ≤ j &lt; N">C[i,j] = Σ(k=0,…,K−1) A[i,k] × B[k,j],  0 ≤ i &lt; M,  0 ≤ j &lt; N</div>
-
 <p>公式确定了每个输出元素的值，却没有指定三个索引的循环次序、每个 GPU 线程负责多少元素、输入何时从全局内存加载。这些选择共同构成<strong>调度与映射</strong>。可行候选必须满足数据依赖、索引边界及 GPU 资源限制；在可行集合内，调优器用指定的测量指标比较运行时间。TC 的搜索维度包含融合策略、分块、CUDA 网格和线程块规模、展开程度、共享或私有存储使用等。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§5–6</a></p>
 <p>因此，自动调优的完整对象并不只是一个“最佳块大小”，而是一个由计算定义、输入形状及步幅、目标硬件、候选生成规则、正确性条件、测量方法组成的优化问题。相同算子在不同形状或硬件上可能选出不同内核；选定版本要随这些条件一起缓存。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§6.1</a></p>
 </section>
@@ -180,7 +183,6 @@
 <p>把 <code>C[i,j]=0</code> 记为语句 S，把 <code>C[i,j]+=A[i,k]*B[k,j]</code> 记为语句 T。两类执行实例的<strong>迭代域</strong>为</p>
 <div class="formula" role="math" aria-label="D_S = {(i,j) | 0 ≤ i &lt; M, 0 ≤ j &lt; N}；D_T = {(i,j,k) | 0 ≤ i &lt; M, 0 ≤ j &lt; N, 0 ≤ k &lt; K}">D_S = {(i,j) | 0 ≤ i &lt; M, 0 ≤ j &lt; N}
 D_T = {(i,j,k) | 0 ≤ i &lt; M, 0 ≤ j &lt; N, 0 ≤ k &lt; K}</div>
-
 <p><code>T(i,j,k)</code> 的读访问包括 <code>A(i,k)</code>、<code>B(k,j)</code> 与累加器 <code>C(i,j)</code>，写访问是 <code>C(i,j)</code>。同一个 (i,j) 必须先初始化，再完成其归约；不同 (i,j) 可作为并行工作。<strong>调度</strong>是将执行实例映射到逻辑执行次序的函数。先完成全部初始化再计算全部累加是一种调度；在每个输出元素内部紧接初始化进行归约，是另一种合法调度。后一种把相同输出的数据访问靠得更近，即论文图 3 的融合思路。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§5、附录 A.3</a></p>
 <p>若把输出按 32×32 分块，外层块索引可写为 (⌊i/32⌋, ⌊j/32⌋)，块内索引为 (i mod 32, j mod 32)。不同输出块可映射到不同 CUDA 线程块；每块内部再分配给线程。合法性来自依赖关系，性能则要评估数据复用、全局内存访问、共享内存占用和启动配置。多面体模型的价值，是让循环重排、融合、分块与映射建立在同一套实例和依赖表示上。<a class="inline-link" href="https://acohen.gitlabpages.inria.fr/impact/impact2014/papers/impact2014-verdoolaege.pdf">Schedule Trees 论文，§2</a> <a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§5</a></p>
 <p><strong>仿射访问</strong>指下标由索引和参数的线性组合加常数构成，例如 <code>A(i,k)</code>、<code>I(i+x)</code>。这类访问容易用整数约束表达。<code>X(Idx(i))</code> 的实际地址取决于数据值；TC 对其外围可确定部分进行分析，并用专门的间接访问存储提升处理部分情况。由此可见，多面体编译在本文是一个适合大量规则循环的优化框架，而算子定义中存在间接访问时还需要补充机制。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§3、§5.5</a></p>
@@ -255,6 +257,7 @@ D_T = {(i,j,k) | 0 ≤ i &lt; M, 0 ≤ j &lt; N, 0 ≤ k &lt; K}</div>
 <p>TVM 论文以图级优化、算子级调度与多硬件后端为系统目标；其学习型代价模型用于减少昂贵的真实测量。Ansor 进一步把高层程序结构称为 <em>sketch</em>，自动生成结构并采样低层参数，再用演化搜索和代价模型优化完整程序。Triton 则把 tile 作为程序中的显式对象，编译器围绕 tile 级操作优化。这些路线共享“计算定义—候选实现—性能反馈”的问题，但输入语言、候选空间与自动化边界不同。<a class="inline-link" href="https://www.usenix.org/system/files/osdi18-chen.pdf">TVM 论文，§1、§5</a> <a class="inline-link" href="https://www.usenix.org/system/files/osdi20-zheng.pdf">Ansor 论文，§1、§3–5</a> <a class="inline-link" href="https://www.eecs.harvard.edu/~htk/publication/2019-mapl-tillet-kung-cox.pdf">Triton 论文，§1–2</a></p>
 <p>原文例子宜以计算规则为准，而不宜机械复制每一行。TC 论文的 <code>fcrelu</code> 示例把偏置声明为长度 <code>I</code>，随后却按输出维度 <code>j</code> 索引；分组卷积示例的 <code>B(m)</code> 中 <code>m</code> 未定义。这两处索引与声明不一致。理解机制时，应以相应张量维度核对下标，再写自己的最小示例。<a class="inline-link" href="https://arxiv.org/pdf/1802.04730">TC 论文，§3、§7</a></p>
 </section>
+<!-- TC_ARTICLE_END -->
             <div class="reader-actions"><a href="../">← 返回论文阅读</a><a href="#main">回到顶部 ↑</a></div>
           </article>
         </div>

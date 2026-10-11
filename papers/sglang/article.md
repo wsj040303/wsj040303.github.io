@@ -1,30 +1,37 @@
 # SGLang: Efficient Execution of Structured Language Model Programs
 
-本文精读 Zheng 等人在 NeurIPS 2024 发表的 SGLang 论文，解释前端程序与推理运行时如何配合，以及 RadixAttention、压缩有限状态机和 API 推测执行分别节省了什么。读者需要了解大语言模型按 token 自回归生成；KV 缓存、前缀匹配和约束解码所需的概念会在首次使用时说明。所有性能数字均为作者报告，本文没有重新运行基准测试。[论文原文](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+本文精读 Zheng 等人在 NeurIPS 2024 发表的 SGLang 论文，解释前端程序与推理运行时如何配合，以及 RadixAttention、压缩有限状态机和 API 推测执行分别节省了什么。读者需要先了解大语言模型按 token 自回归生成；KV 缓存、前缀匹配和约束解码等概念。[论文原文](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ## 主要工作
 
-**语言模型程序**（LM program）用控制流组织多次模型调用，并处理结构化输入或输出。SGLang 为这类程序提供两个协作部分：嵌入 Python 的前端语言负责表示提示、生成、选择和并行分支；运行时负责执行模型请求，并利用调用之间的共享结构减少重复工作。论文的主要贡献是让程序暴露的提示前缀、分支和输出约束成为运行时可利用的信息。[论文，§1–2、图 1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+**语言模型程序**（LM program）用控制流组织多次模型调用，并处理结构化输入或输出。SGLang 为这类程序提供两个协作部分：嵌入 Python 的前端语言负责表示提示、生成、选择和并行分支；运行时负责执行模型请求，并利用调用之间的共享结构减少重复工作。
+论文的主要贡献大概有三项：
+
+[论文，§1–2、图 1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ![论文图 1：SGLang 客户端语言原语经解释器交给运行时执行，运行时包含三项优化](images/sglang-figure-1-architecture.png)
 
 *图 1：论文的系统架构。前端通过解释器发出操作，后端利用请求结构实施 RadixAttention、压缩 FSM 和 API 推测执行。截取自 [Zheng 等，2024，原文图 1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=2)。*
 
-图 1 的箭头表示职责边界：前端记录“当前提示是什么、下一步应生成或选择什么”，解释器按程序控制流提交操作；运行时接收可执行的请求。RadixAttention 的输入是多个请求的 token 前缀，压缩 FSM 的输入是输出正则约束，API 推测执行利用程序中连续的生成原语。理解这三种输入，才能判断各项优化在什么负载上会起作用。
+图 1 的箭头表示职责边界：前端记录“当前提示是什么、下一步应生成或选择什么”，解释器按程序控制流提交操作；运行时接收可执行的请求。
 
-对于本地运行的开放权重模型，RadixAttention 将共享前缀的键值缓存（KV cache）跨调用保留下来，压缩有限状态机（FSM）跳过结构化输出中已被语法确定的连续文本。对于只能通过黑盒 API 访问的模型，API 推测执行尝试把相邻生成合并进一次端点调用。论文在其测试配置与基线下报告，开放权重模型工作负载的**最大吞吐量最高提高 6.4 倍、单程序平均延迟最多降低 3.7 倍**；这些“最高”值来自不同工作负载，不能理解为每一种请求都有同样收益。[论文，摘要、§6.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+对于本地运行的开放权重模型，RadixAttention 将共享前缀的键值缓存（KV cache）跨调用保留下来，压缩有限状态机（FSM）跳过结构化输出中已被语法确定的连续文本。对于只能通过黑盒 API 访问的模型，API 推测执行尝试把相邻生成合并进一次端点调用。论文在其测试配置与基线下报告，开放权重模型工作负载的最大吞吐量最高提高 6.4 倍、单程序平均延迟最多降低 3.7 倍。[论文，摘要、§6.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ## 研究背景
 
-单次聊天请求可以直接调用推理引擎。多步推理、智能体和结构化输出程序则常先生成中间结果，再依据结果决定后续提示或并行分支。例如先判断文章是否与图片相关，再并行生成不同维度的评价，最后汇总成 JSON。此时，程序员既要维护提示状态和变量，又要安排生成、等待和输出解析。论文以这一类多调用工作流为目标；SGLang 的前端原语减少手写字符串处理和并行控制。[论文，§1–2、图 2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+单次聊天请求可以直接调用推理引擎。而多步推理、智能体和结构化输出程序则常先生成中间结果，再依据结果决定后续提示或并行分支。例如先判断文章是否与图片相关，再并行生成不同维度的评价，最后汇总成 JSON。此时，程序员既要维护提示状态和变量，又要安排生成、等待和输出解析。论文以这一类多调用工作流为目标；SGLang 的前端原语减少手写字符串处理和并行控制。[论文，§1–2、图 2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 运行时的问题来自自回归推理。模型先对输入提示执行 **prefill**，为提示中的各个 token 计算各层注意力所需的键和值；之后的 **decode** 阶段每生成一个 token，都利用这些历史键和值计算对前文的注意力。保存历史键和值的显存区域称为 **KV 缓存**。设提示为 token 序列 `P = [p₁, p₂, …, pₙ]`：在因果注意力下，位置 `i` 的 KV 由到 `i` 为止的前缀决定。两个请求若使用相同模型及相关执行配置，且前 `k` 个 token 完全相同，就有机会共享前 `k` 个位置的 KV；从第 `k+1` 个不同 token 开始仍需继续计算。[论文，§3、附录 A.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-这解释了“共享前缀”为何必须按 token 判断。两个提示含义相近但 token 不同，或相同词语出现在不同位置，前向计算的输入已经改变，不能直接复用同一段 KV。多轮会话、相同系统提示、少样本示例，以及一条提示分叉出的多个请求，都可能产生**逐 token 相同**的前缀。另一种浪费发生在有格式约束的输出中：若语法已确定接下来几个字符的唯一取值，仍让模型逐 token 决定这些字符，就增加了本可跳过的解码步骤。[论文，§3–4、附录 A.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+这里的“共享前缀”指两个请求从第一个 token 开始，连续若干个 token 完全相同。用数字代替 token ID 举例：请求 A 是 `[11, 20, 30, 41]`，请求 B 是 `[11, 20, 30, 57]`。两者可以复用前 3 个 token 的 KV；从第 4 个 token 起，输入不同，后续 KV 要分别计算。这些数字只是说明匹配规则的示意，不是论文实验中的真实 token。[论文，§3、附录 A.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+在实际程序中，前 3 个 token 可以对应两条请求共同的系统提示，后面的 token 对应不同问题；多轮会话、相同少样本示例和提示分叉也会产生这样的公共起始序列。缓存比较的是模型实际接收的 token 序列：两句话即使意思相近，只要 token 不同，就不能直接共享 KV；同一个词换到提示的另一位置时，它前面的 token 变了，该位置的 KV 也会随之变化。[论文，§3、附录 A.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ## 问题定义
 
 给定一个语言模型程序，系统既要执行程序规定的生成、选择和控制流，也要在多个调用及程序实例之间复用计算。这里的**程序实例**是同一程序针对一份输入执行一次；一次实例内部也可能发出多个模型请求。对开放权重模型，运行时能控制 KV 缓存与模型前向传播；对仅提供 API 的模型，运行时只能控制调用方式、提示和返回结果的使用。因此论文采用三种机制处理三个不同的重复成本：共享前缀重复 prefill、被语法确定的文本重复解码，以及相邻 API 调用重复发送上下文。[论文，§2–5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+第二种成本出现在有格式约束的输出中。例如 JSON 语法已确定接下来只能输出固定键名和标点时，逐 token 调用模型决定这些字符会增加解码步骤。它与共享前缀的重复 prefill 是两种不同的浪费：前者发生在生成已确定的后续内容时，后者发生在重新处理已出现的相同输入时。压缩 FSM 和 RadixAttention 分别处理这两种情况。[论文，§3–4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 这三项优化的输入条件不同。RadixAttention 要求运行时能够持有模型的 KV 缓存，并且有可复用的相同 token 前缀；压缩 FSM 要求生成过程由正则表达式约束，且某些状态之后只有唯一合法延续；API 推测执行针对只能通过端点调用的模型，并且连续的生成步骤能够被提前生成的文本匹配。一个程序可以同时包含多种机会，例如图 2 的并行评价分支共享提示前缀，最后的 JSON 生成具有格式约束。[论文，图 2、§3–5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 

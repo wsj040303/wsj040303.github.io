@@ -8,9 +8,9 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
-    title: "Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions",
+    title: "Tensor Comprehensions 论文阅读报告",
     shortName: "Tensor Comprehensions / TC",
-    aliases: ["张量理解", "算子自动调优", "张量编译器"],
+    aliases: ["Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions", "张量理解", "算子自动调优", "张量编译器"],
     category: "compiler",
     year: "2018",
     venue: "FAIR 技术报告",

@@ -1,6 +1,10 @@
 .article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
 .reader-heading h1 { font-size: clamp(36px, 3.7vw, 52px); line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
 .chapter-panel { max-height: 100vh; overflow-y: auto; }
+.chapter-list .chapter-sublist { margin: -2px 0 8px; padding: 0; list-style: none; }
+.chapter-list .chapter-sublist li a { padding: 8px 20px 8px 38px; font-size: 12px; }
+.chapter-list .chapter-sublist li a::before { content: ""; flex: 0 0 5px; width: 5px; height: 5px; margin-top: 7px; border-radius: 50%; background: currentColor; opacity: .55; }
+.reader-content section h4 { scroll-margin-top: 30px; }
 .paper-article .paper-intro { margin-bottom: 34px; }
 .paper-article .paper-intro p { margin: 0; color: #354f3c; font-size: 14px; line-height: 1.9; }
 .paper-article .paper-figure {

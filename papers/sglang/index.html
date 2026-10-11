@@ -9,7 +9,7 @@
     <title>SGLang: Efficient Execution of Structured Language Model Programs · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../../assets/garden.css">
-    <link rel="stylesheet" href="../../assets/paper-article.css">
+    <link rel="stylesheet" href="../../assets/paper-article.css?v=toc-20261011">
     <script src="../../assets/site.js" defer></script>
   </head>
   <body>
@@ -40,8 +40,8 @@
 <li><a href="#overview">主要工作</a></li>
 <li><a href="#background">研究背景</a></li>
 <li><a href="#problem">问题定义</a></li>
-<li><a href="#method">方法原理</a></li>
-<li><a href="#evidence">实验与证据</a></li>
+<li><a href="#method">方法原理</a><ol class="chapter-sublist"><li><a href="#method-1">前端原语与异步执行</a></li><li><a href="#method-2">RadixAttention 的跨调用前缀复用</a></li><li><a href="#method-3">压缩有限状态机与确定文本</a></li><li><a href="#method-4">API 推测执行的调用合并</a></li></ol></li>
+<li><a href="#evidence">实验与证据</a><ol class="chapter-sublist"><li><a href="#evidence-1">实验配置与整体结果</a></li><li><a href="#evidence-2">组件消融与机制证据</a></li></ol></li>
 <li><a href="#limitations">局限性</a></li>
 <li><a href="#conclusion">结论</a></li>
 <!-- SGLANG_TOC_END -->
@@ -68,14 +68,14 @@
 <p>这三项优化的输入条件不同。RadixAttention 要求运行时能够持有模型的 KV 缓存，并且有可复用的相同 token 前缀；压缩 FSM 要求生成过程由正则表达式约束，且某些状态之后只有唯一合法延续；API 推测执行针对只能通过端点调用的模型，并且连续的生成步骤能够被提前生成的文本匹配。一个程序可以同时包含多种机会，例如图 2 的并行评价分支共享提示前缀，最后的 JSON 生成具有格式约束。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，图 2、§3–5</a></p>
 </section>
 <section id="method"><h3>方法原理</h3>
-<h4>前端原语与异步执行</h4>
+<h4 id="method-1">前端原语与异步执行</h4>
 <p>SGLang 把提示状态放在变量 <code>s</code> 中。<code>s += ...</code> 追加文本或消息；<code>gen(&quot;name&quot;)</code> 调用模型并把结果存为具名变量；<code>select</code> 从候选中选概率最高的一项；<code>fork</code> 复制当前提示形成并行分支。<code>gen</code> 的 <code>regex</code> 参数给生成结果施加正则表达式约束。它们嵌入 Python，因此程序仍可使用 <code>if</code>、循环和普通函数。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、图 2</a></p>
 <figure class="paper-figure"><a class="inline-link" href="images/sglang-figure-2-program.png" aria-label="打开原尺寸论文图片"><img src="images/sglang-figure-2-program.png" alt="论文图 2：多维作文评价的 SGLang 程序，标出选择、分叉、并行生成、汇合、API 推测执行及约束解码的位置" loading="lazy" decoding="async"></a><figcaption>图 2：论文用于贯穿全文的多维作文评价程序。代码右侧的箭头标出各原语与运行时优化的对应位置。截取自 <a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=3">Zheng 等，2024，原文图 2</a>。</figcaption></figure>
 
 <p>图 2 可沿执行顺序读成四段。第一段用 <code>system</code>、<code>user</code> 和 <code>assistant</code> 组成提示，并把图片和作文传给模型。第二段通过 <code>select(&quot;related&quot;, choices=[&quot;yes&quot;, &quot;no&quot;])</code> 在两个候选中选概率较高的一项；随后读取 <code>s[&quot;related&quot;]</code>，Python 的 <code>if</code> 才能决定是否提前返回。第三段用 <code>s.fork(len(dimensions))</code> 从当前提示创建三个分支，每个分支追加不同的评价维度并执行 <code>gen(&quot;judgment&quot;)</code>，最后读取各分支的 <code>judgment</code> 并用 Python 的 <code>join</code> 合并文本。第四段先生成摘要和等级，再用 <code>gen(&quot;output&quot;, regex=schema)</code> 生成满足格式约束的 JSON。这里的 <code>fork</code> 是 SGLang 的提示分叉，<code>&quot;\n&quot;.join(...)</code> 是 Python 字符串合并，两者操作的对象不同。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、图 2</a></p>
 <p><code>select</code> 的结果会影响 Python 分支，程序必须在读取 <code>s[&quot;related&quot;]</code> 时等待该结果；三个 <code>gen(&quot;judgment&quot;)</code> 则在读取结果以前没有相互依赖，可以并行提交。前端由此把<strong>必要的同步点</strong>和<strong>可以重叠的生成调用</strong>表达给运行时。三个评价分支还继承同一段原始提示，构成 RadixAttention 可复用的公共前缀；最后的 <code>regex</code> 则把 JSON 的合法输出路径交给压缩 FSM。这正是图 1 中前端信息进入后端优化的具体过程。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2–4、图 2</a></p>
 <p>论文默认采用解释执行：前端把追加、生成和选择提交到提示对应的异步流；Python 代码可继续提交后续操作，读取尚未完成的生成变量时才等待。每个提示流由后台执行器管理，分支的多个流因此可以同时推进。论文也提到把程序编译为计算图的执行方式，但其主要实验默认使用解释模式。前端执行器在 <code>fork</code> 时还会先发送公共前缀作为提示，再发送分支剩余内容，以帮助运行时正确插入基数树并匹配缓存。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2–3、附录 D</a></p>
-<h4>RadixAttention 的跨调用前缀复用</h4>
+<h4 id="method-2">RadixAttention 的跨调用前缀复用</h4>
 <p><strong>基数树</strong>（radix tree）是边可保存一段 token 序列的压缩前缀树。RadixAttention 在树中记录 token 前缀与对应 KV 张量的位置。新请求到来时，运行时查找最长可复用前缀：命中部分直接引用现有 KV，只对余下 token 计算 prefill；生成的新 token 也可以插入树中，供之后的请求使用。这样既覆盖同一程序的后续调用和 <code>fork</code> 分支，也覆盖不同程序实例。复用依据是实际 token 前缀，而非两段提示在自然语言上“意思相近”。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、图 3</a></p>
 <figure class="paper-figure"><a class="inline-link" href="images/sglang-figure-3-radix-tree.png" aria-label="打开原尺寸论文图片"><img src="images/sglang-figure-3-radix-tree.png" alt="论文图 3：九个时刻中基数树的节点分裂、前缀复用、插入及叶节点驱逐" loading="lazy" decoding="async"></a><figcaption>图 3：RadixAttention 的九步运行示例。蓝色节点为当前时刻访问的已缓存节点，绿色为新节点，橙色虚线节点为被驱逐的节点；边上的文字表示一段 token 序列。截取自 <a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=5">Zheng 等，2024，原文图 3</a>。</figcaption></figure>
 
@@ -86,7 +86,7 @@
 <p>缓存命中率在论文中定义为“已缓存的提示 token 数 / 提示 token 总数”。它度量实际免去多少提示计算，比“有多少请求命中至少一个 token”更适合解释 prefill 的节省。例如两个请求都命中同一系统提示，其中一个提示总长 100 token、另一个总长 1000 token，命中 80 token 对两者的计算占比不同。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3</a></p>
 <p>请求处理顺序决定缓存会不会在复用前被挤出。假设等待队列中两条请求都以 <code>P</code> 开头，第三条以不相关的 <code>Q</code> 开头；显存只能保留其中一组旧前缀。先处理两条 <code>P</code> 请求，可以在处理第二条时继续使用 <code>P</code>；中途切到 <code>Q</code> 则可能先驱逐 <code>P</code>，再为第二条重算。论文因此在批量场景优先安排<strong>匹配前缀较长</strong>的请求，而不是简单按到达先后处理。其定理 3.1 证明：对已知的离线请求批次，若缓存容量至少覆盖最长请求，按请求基数树深度优先访问可达到最优命中率；论文把最长共享前缀优先顺序与这种深度优先顺序对应起来。在线请求不断到达、生成长度无法预知时，调度不再拥有定理的完整条件；长期优先高命中请求还可能造成其他请求饥饿。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、定理 3.1、附录 A.3</a></p>
 <p>因此，论文的贡献不宜概括为“首次跨请求复用 KV”。作者在相关工作中也列出了已有的部分复用方案。其系统设计是将<strong>跨调用保留、树状多级前缀共享、LRU 驱逐与感知前缀的调度</strong>结合，自动覆盖程序的动态共享模式。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、§7</a></p>
-<h4>压缩有限状态机与确定文本</h4>
+<h4 id="method-3">压缩有限状态机与确定文本</h4>
 <p>结构化输出的 <code>regex</code> 先被转换为有限状态机（FSM）：状态表示当前已经匹配到的语法位置，转移表示下一段允许的字符或字符串。普通约束解码在每次模型预测后按当前状态屏蔽非法 token，再从合法 token 中选取下一个 token。这里的<strong>一次 decode</strong>指推动自回归生成的一次模型前向传播。普通运行时逐 token 推进，原因还包括 FSM 与模型执行器没有协同处理连续的确定文本；仅凭“掩码非法 token”本身不足以推出所有实现都只能逐 token 前进。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§4、图 4、附录 B</a></p>
 <figure class="paper-figure"><a class="inline-link" href="images/sglang-figure-4-fsm.png" aria-label="打开原尺寸论文图片"><img src="images/sglang-figure-4-fsm.png" alt="论文图 4：普通 FSM 与压缩 FSM 的状态、token 和模型前向传播对照" loading="lazy" decoding="async"></a><figcaption>图 4：原文图 4 的四个子图。(a) 是逐字符转移，(b) 是压缩后的转移，(c) 与 (d) 比较生成同一段固定 JSON 前缀时需要的模型解码步骤；图中下划线代表空格。截取自 <a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=6">Zheng 等，2024，原文图 4</a>。</figcaption></figure>
 
@@ -94,7 +94,7 @@
 <p><strong>单一转移边</strong>指其源状态只有一个后继，且该边只接受唯一字符或字符串。压缩 FSM 把相邻的此类边合并成较长的确定片段。模型走到该片段时，运行时已知道接下来必须出现什么，于是通过 <strong>jump forward</strong> 把整段文本推进到后续状态，省去其中逐 token 采样与重复解码。论文图 4 中 <code>{&quot;summary&quot;: &quot;</code> 是示例：普通流程里的多个 <code>LLM decode</code> 节点表示该常量片段经历多次模型前向传播；压缩流程将它作为一段处理。重新进入模型解码前，还要用模型原有 tokenizer 对已有文本及跳过的片段重新分词，因为字符边界和 token 边界并不一一对应。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§4、图 4、附录 B.1–B.2</a></p>
 <p>实现时，SGLang 先在<strong>字符或字符串</strong>层构造原始 FSM，再把连续单一转移并入压缩边。运行中，模型生成一个 token 后，运行时取得该 token 对应的字符串，匹配当前状态的出边；如果该出边后面已经压缩了一段唯一后续，就能跳到压缩边终点。压缩边的字符串仍须转回模型能接收的 token。论文附录 B.2 说明，直接把长字符串任意切分可能改变输入语义，因此实现用模型原有 tokenizer 对此前文本和压缩片段重新分词，再继续后续解码。压缩 FSM 节省的是<strong>反复向模型询问已确定片段</strong>的步骤，重新分词与继续计算仍有成本。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，附录 B.1–B.2</a></p>
 <p>静态已知且由程序直接控制的字面量可以直接拼进提示；论文图 2 的 <code>&quot;In summary,&quot;</code> 就这样使用。压缩 FSM 更有价值的情形是<strong>确定内容出现的位置要等运行时才知道</strong>。例如生成形如 <code>{&quot;summary&quot;: &quot;&lt;模型写的内容&gt;&quot;, &quot;grade&quot;: &quot;&lt;模型选的等级&gt;&quot;}</code> 的结果时，<code>summary</code> 写多长、何时结束由模型决定；一旦结束，JSON 的 <code>&quot;, &quot;grade&quot;: &quot;</code> 就成为语法规定的唯一后续。程序在生成前知道这段文本是什么，却不知道它应在第几个生成 token 后出现。FSM 在运行时跟踪当前语法状态，恰好能在分界出现后跳过固定片段。若语法允许可选字段，模型的选择还会决定之后哪一段固定键名或分隔符成为唯一后续；这类位置同样无法在生成前简单拼接。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、§4、附录 B.1</a></p>
-<h4>API 推测执行的调用合并</h4>
+<h4 id="method-4">API 推测执行的调用合并</h4>
 <p>前两项优化要控制模型运行时，对黑盒 API 不适用。论文 §5 的例子先生成 <code>name</code>，再生成 <code>job</code>；按两个 <code>gen</code> 顺序调用 API，第二次必须把先前上下文再送入端点，因此同一上下文会计入两次输入 token 费用。若只是抽取两个简单字段，一次让模型输出两者也可能更直接；论文没有证明这个例子必须拆成两次。它讨论的是<strong>已有多调用程序</strong>如何降低重复调用成本。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§5</a></p>
 <p>论文中的程序形态可缩写为：</p>
 <figure class="code-block"><pre><code>s += context + &quot;name:&quot; + gen(&quot;name&quot;, stop=&quot;\n&quot;)
@@ -105,7 +105,7 @@ s += &quot;job:&quot; + gen(&quot;job&quot;, stop=&quot;\n&quot;)
 <p>执行顺序可拆成三步：先在 <code>name</code> 的调用中允许输出越过原定换行停止点；再由解释器把换行后的额外文本暂存，而不是立刻交给 <code>name</code> 变量；最后运行到 <code>&quot;job:&quot; + gen(&quot;job&quot;)</code> 时，检查暂存内容是否能够按程序模板对应到后续生成。只有匹配成立，才能把一次 API 返回拆成两个程序变量并省去后续端点调用。若程序在读到 <code>name</code> 后走向另一条 Python 分支，或模型额外输出不符合预期，提前生成的内容就没有该次复用价值；后续请求仍需要正常执行。这是对论文匹配机制的直接推论，不是论文提供的通用成功率保证。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§5</a></p>
 </section>
 <section id="evidence"><h3>实验与证据</h3>
-<h4>实验配置与整体结果</h4>
+<h4 id="evidence-1">实验配置与整体结果</h4>
 <p>论文主要在 NVIDIA A10G 24 GB 上评估开放权重模型：7B 模型使用单卡，更大模型使用多卡张量并行；另有 A100 80 GB 实验。吞吐量以大量程序实例运行时的<strong>程序实例数/秒</strong>计算；延迟是单个程序不批处理时，多次实例执行的平均时间。基线包括 vLLM 0.2.5、Guidance 0.1.8 和 LMQL 0.7.3，各自使用论文写明的后端。图 5–6 的主要结果使用单张 A10G 上的 Llama-7B。比较是系统及后端组合之间的比较，不能把全部差异归因于某一个优化。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§6.1–6.2、附录 C</a></p>
 <p>论文的工作负载覆盖 5-shot MMLU、20-shot HellaSwag、ReAct 与生成式智能体、思维树、思维骨架、LLM 评价、JSON 解码、四轮短/长对话及 DSPy RAG 管线。不同程序的提示长度、共享模式和输出长度不同，所以同一个优化不可能在所有组别带来相同收益。例如 MMLU 的少样本示例可以跨题复用，HellaSwag 的示例与多选题公共部分可形成两级共享；短对话的前缀计算占比较高，长对话则更易被新 token 的持续解码主导。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§6.1–6.2</a></p>
 <figure class="paper-figure"><a class="inline-link" href="images/sglang-figure-5-throughput.png" aria-label="打开原尺寸论文图片"><img src="images/sglang-figure-5-throughput.png" alt="论文图 5：Llama-7B 上各工作负载的归一化最大吞吐量对比" loading="lazy" decoding="async"></a><figcaption>图 5：单张 A10G 上 Llama-7B 的归一化吞吐量，纵轴越高越好。每组都以该组 SGLang 的吞吐量归一化，图中某些基线没有对应柱表示论文未在该组纳入其结果。截取自 <a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=7">Zheng 等，2024，原文图 5</a>。</figcaption></figure>
@@ -140,7 +140,7 @@ s += &quot;job:&quot; + gen(&quot;job&quot;, stop=&quot;\n&quot;)
 <td>API 推测执行减少重复上下文输入</td>
 </tr>
 </tbody></table></div>
-<h4>组件消融与机制证据</h4>
+<h4 id="evidence-2">组件消融与机制证据</h4>
 <figure class="paper-figure"><a class="inline-link" href="images/sglang-figure-8-ablation.png" aria-label="打开原尺寸论文图片"><img src="images/sglang-figure-8-ablation.png" alt="论文图 8：缓存命中率与批大小、吞吐量、延迟的关系，以及移除缓存、树结构、调度和前端组件的消融结果" loading="lazy" decoding="async"></a><figcaption>图 8：(a) 缓存命中率与批大小、token 吞吐量；(b) 命中率与总延迟、首 token 延迟；(c) 不同组件移除后的归一化吞吐量。截取自 <a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=9">Zheng 等，2024，原文图 8</a>。</figcaption></figure>
 
 <p>图 8(a)(b) 使用思维树负载，并通过在运行时部分禁用已匹配 token 来改变命中率。随着更多提示 token 直接复用 KV，prefill 计算与显存占用降低，批次可以纳入更多请求；图中的批大小和 token 吞吐量随命中率上升，而首 token 延迟及总延迟下降。它展示的是该负载下命中率变化与性能变化的关系，不等于所有请求提高命中率都会得到同样的绝对延迟。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§6.3、图 8</a></p>

@@ -4,6 +4,8 @@
   "scripts": {
     "build:tc": "node scripts/render-tc.mjs",
     "check:tc": "node scripts/render-tc.mjs --check",
+    "build:sglang": "node scripts/render-sglang.mjs",
+    "check:sglang": "node scripts/render-sglang.mjs --check",
     "build:cuda": "node scripts/render-cuda.mjs",
     "check:cuda": "node scripts/render-cuda.mjs --check"
   },

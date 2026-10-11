@@ -7,6 +7,10 @@ my notes-especially for ai-infra
 
 本地生成与核对命令：npm ci、npm run build:tc、npm run check:tc。只修改 Markdown 不会更新已发布的 HTML 正文。
 
+## 编辑 SGLang 阅读报告
+
+正文源文件是 [papers/sglang/article.md](papers/sglang/article.md)。修改后运行 `npm run build:sglang` 生成页面，再运行 `npm run check:sglang` 核对 HTML 与 Markdown 一致。
+
 ## 编辑 CUDA 性能测试与调优
 
 正文源文件是 [notes/cuda/performance.md](notes/cuda/performance.md)。直接修改段落、表格和代码块；标有 `<!-- CUDA_SOURCE -->` 的完整 CUDA 代码块也会生成下载用的 `notes/examples/cuda_perf_bench.cu`，因此只需改 Markdown 一份。

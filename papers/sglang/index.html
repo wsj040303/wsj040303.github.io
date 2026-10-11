@@ -1,0 +1,129 @@
+<!doctype html>
+<!-- Generated from article.md with npm run build:sglang; edit the Markdown source. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="精读 SGLang 论文，理解前端编程模型、RadixAttention、压缩有限状态机与 API 推测执行。">
+    <meta name="theme-color" content="#0b2015">
+    <title>SGLang 论文阅读报告 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/paper-article.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a>
+          <a href="../../ai-infra/">AI Infra</a>
+          <a href="../" aria-current="page">论文阅读</a>
+          <a href="../../projects/">GitHub 项目</a>
+          <a href="../../resources/">推荐资料</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../">论文阅读</a><span>/</span>SGLang</nav>
+        <div class="reader-heading"><h1>SGLang 论文阅读报告</h1><p class="article-deck">理解结构化语言模型程序的执行与三项运行时优化。</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>文章目录</summary><nav aria-label="本文目录"><ol class="chapter-list">
+<!-- SGLANG_TOC_START -->
+<li><a href="#overview">主要工作</a></li>
+<li><a href="#background">研究背景</a></li>
+<li><a href="#problem">问题定义</a></li>
+<li><a href="#method">方法原理</a></li>
+<li><a href="#evidence">实验与证据</a></li>
+<li><a href="#limitations">局限性</a></li>
+<li><a href="#conclusion">结论</a></li>
+<!-- SGLANG_TOC_END -->
+            </ol></nav></details>
+          </aside>
+          <article class="reader-content paper-article">
+<!-- SGLANG_ARTICLE_START -->
+<div class="paper-intro"><p>本文精读 Zheng 等人在 NeurIPS 2024 发表的 <em>SGLang: Efficient Execution of Structured Language Model Programs</em>。重点是前端编程模型与运行时如何配合，以及论文中的三项优化：RadixAttention、压缩有限状态机和 API 推测执行。读者需要了解大语言模型的自回归生成；下文会从请求前缀解释 KV 缓存与约束解码。性能数字均为论文报告，本文没有复现实验。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文原文</a></p>
+</div>
+<section id="overview"><h3>主要工作</h3>
+<p><strong>语言模型程序</strong>（LM program）用控制流组织多次模型调用，并处理结构化输入或输出。SGLang 为这类程序提供两个协作部分：嵌入 Python 的前端语言负责表示提示、生成、选择和并行分支；运行时负责执行模型请求，并利用调用之间的共享结构减少重复工作。论文的主要贡献是让程序暴露的提示前缀、分支和输出约束成为运行时可利用的信息。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§1–2、图 1</a></p>
+<p>对于本地运行的开放权重模型，RadixAttention 将共享前缀的键值缓存（KV cache）跨调用保留下来，压缩有限状态机（FSM）跳过结构化输出中已被语法确定的连续文本。对于只能通过黑盒 API 访问的模型，API 推测执行尝试把相邻生成合并进一次端点调用。论文在其测试配置与基线下报告，开放权重模型工作负载的<strong>最大吞吐量最高提高 6.4 倍、单程序平均延迟最多降低 3.7 倍</strong>；这些“最高”值来自不同工作负载，不能理解为每一种请求都有同样收益。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，摘要、§6.2</a></p>
+</section>
+<section id="background"><h3>研究背景</h3>
+<p>单次聊天请求可以直接调用推理引擎。多步推理、智能体和结构化输出程序则常先生成中间结果，再依据结果决定后续提示或并行分支。例如先判断文章是否与图片相关，再并行生成不同维度的评价，最后汇总成 JSON。此时，程序员既要维护提示状态和变量，又要安排生成、等待和输出解析。论文以这一类多调用工作流为目标；SGLang 的前端原语减少手写字符串处理和并行控制。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§1–2、图 2</a></p>
+<p>运行时的问题来自自回归推理。模型先对输入提示执行 <strong>prefill</strong>，计算各层注意力所需的键和值；之后每生成一个 token，解码阶段都利用已有 KV 缓存读取前文信息。若两个调用的模型、配置和实际 token 前缀相同，共享前缀对应的 KV 可以复用。多轮会话、相同的系统提示以及一条提示分叉出的多个请求都提供这种机会；后续变化的部分仍需计算。与此并行，输出格式约束可能让若干连续字符只能取唯一值，逐 token 调用模型便做了多余的解码工作。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§1、§3–4、附录 A.1</a></p>
+</section>
+<section id="problem"><h3>问题定义</h3>
+<p>给定一个语言模型程序，系统既要执行程序规定的生成、选择和控制流，也要在多个调用及程序实例之间复用计算。这里的<strong>程序实例</strong>是同一程序针对一份输入执行一次；一次实例内部也可能发出多个模型请求。对开放权重模型，运行时能控制 KV 缓存与模型前向传播；对仅提供 API 的模型，运行时只能控制调用方式、提示和返回结果的使用。因此论文采用三种机制处理三个不同的重复成本：共享前缀重复 prefill、被语法确定的文本重复解码，以及相邻 API 调用重复发送上下文。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2–5</a></p>
+</section>
+<section id="method"><h3>方法原理</h3>
+<h4>前端原语与异步执行</h4>
+<p>SGLang 把提示状态放在变量 <code>s</code> 中。<code>s += ...</code> 追加文本或消息；<code>gen(&quot;name&quot;)</code> 调用模型并把结果存为具名变量；<code>select</code> 从候选中选概率最高的一项；<code>fork</code> 复制当前提示形成并行分支。<code>gen</code> 的 <code>regex</code> 参数给生成结果施加正则表达式约束。它们嵌入 Python，因此程序仍可使用 <code>if</code>、循环和普通函数。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、图 2</a></p>
+<p>论文默认采用解释执行：前端把追加、生成和选择提交到提示对应的异步流；Python 代码可继续提交后续操作，读取尚未完成的生成变量时才等待。分支的多个流因此可以同时推进。这个执行模式一方面让前端显式管理程序内并行，另一方面向运行时暴露多个请求之间的公共前缀；优化并非仅来自更简短的语法。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、§6.3</a></p>
+<h4>RadixAttention 的跨调用前缀复用</h4>
+<p><strong>基数树</strong>（radix tree）是边可保存一段 token 序列的压缩前缀树。RadixAttention 在树中记录 token 前缀与对应 KV 张量的位置。新请求到来时，运行时查找最长可复用前缀：命中部分直接引用现有 KV，只对余下 token 计算 prefill；生成的新 token 也可以插入树中，供之后的请求使用。这样既覆盖同一程序的后续调用和 <code>fork</code> 分支，也覆盖不同程序实例。复用依据是实际 token 前缀，而非两段提示在自然语言上“意思相近”。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、图 3</a></p>
+<p>论文比较的常规处理方式会在<strong>单条生成请求完成后</strong>释放该请求的 KV；下一请求即使带有相同前缀，也要重算。RadixAttention 让完成请求留下的 KV 继续作为缓存候选。GPU 显存不足时，运行时按最近最少使用（LRU）策略从可驱逐的叶节点释放缓存；当前运行请求引用的节点有引用计数，引用数不为零时不能驱逐。先释放叶节点可以保住多个分支共享的祖先前缀。缓存和当前请求共用同一个内存池，所以当更多等待请求需要显存时，缓存空间会让位于运行中的批次。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、图 3</a></p>
+<p>例如已有 <code>系统提示 → 问题 A → 回答 A</code> 的 KV，新的分支 <code>系统提示 → 问题 B</code> 可以命中系统提示；继续该会话的请求还可以命中到回答 A。树结构保留这两个层级，较之只缓存整段请求或单一固定系统提示，能够表达动态分支。请求处理顺序也会影响缓存是否在复用前被驱逐：论文在批量场景优先安排匹配前缀较长的请求，并在离线、缓存容量至少覆盖最长请求等条件下证明相应深度优先顺序的最优命中率。在线到达和输出长度未知会打破该证明的理想条件；过度追求命中率还可能使等待请求饥饿。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、定理 3.1、附录 A.3</a></p>
+<p>因此，论文的贡献不宜概括为“首次跨请求复用 KV”。作者在相关工作中也列出了已有的部分复用方案。其系统设计是将<strong>跨调用保留、树状多级前缀共享、LRU 驱逐与感知前缀的调度</strong>结合，自动覆盖程序的动态共享模式。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、§7</a></p>
+<h4>压缩有限状态机与确定文本</h4>
+<p>结构化输出的 <code>regex</code> 先被转换为有限状态机（FSM）：状态表示当前已经匹配到的语法位置，转移表示下一段允许的字符或字符串。普通约束解码在每次模型预测后按当前状态屏蔽非法 token，再从合法 token 中选取下一个 token。这里的<strong>一次 decode</strong>指推动自回归生成的一次模型前向传播。普通运行时逐 token 推进，原因还包括 FSM 与模型执行器没有协同处理连续的确定文本；仅凭“掩码非法 token”本身不足以推出所有实现都只能逐 token 前进。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§4、图 4、附录 B</a></p>
+<p><strong>单一转移边</strong>指其源状态只有一个后继，且该边只接受唯一字符或字符串。压缩 FSM 把相邻的此类边合并成较长的确定片段。模型走到该片段时，运行时已知道接下来必须出现什么，于是通过 <strong>jump forward</strong> 把整段文本推进到后续状态，省去其中逐 token 采样与重复解码。论文图 4 中 <code>{&quot;summary&quot;: &quot;</code> 是示例：普通流程里的多个 <code>LLM decode</code> 节点表示该常量片段经历多次模型前向传播；压缩流程将它作为一段处理。重新进入模型解码前，还要用模型原有 tokenizer 对已有文本及跳过的片段重新分词，因为字符边界和 token 边界并不一一对应。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§4、图 4、附录 B.1–B.2</a></p>
+<p>静态已知且由程序直接控制的字面量可以直接拼进提示；论文图 2 的 <code>&quot;In summary,&quot;</code> 就这样使用。压缩 FSM 更有价值的情形是<strong>确定内容出现的位置要等运行时才知道</strong>。例如某个变长 <code>summary</code> 何时结束由模型决定，结束后 JSON 的 <code>&quot;, &quot;grade&quot;: &quot;</code> 才成为语法规定的唯一后续；在程序编写时，无法把这个边界预先插入生成字符串。可选字段或数组元素数量由模型决定时也有类似情形。此处优化来自“当前位置只剩唯一合法延续”，而非必须把所有固定 JSON 字符交给模型生成。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§2、§4、附录 B.1</a></p>
+<h4>API 推测执行的调用合并</h4>
+<p>前两项优化要控制模型运行时，对黑盒 API 不适用。论文 §5 的例子先生成 <code>name</code>，再生成 <code>job</code>；按两个 <code>gen</code> 顺序调用 API，第二次必须把先前上下文再送入端点，因此同一上下文会计入两次输入 token 费用。若只是抽取两个简单字段，一次让模型输出两者也可能更直接；论文没有证明这个例子必须拆成两次。它讨论的是<strong>已有多调用程序</strong>如何降低重复调用成本。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§5</a></p>
+<p>SGLang 在第一次 API 调用中暂时忽略原定停止条件，让模型额外生成后续文本。解释器保存超出第一段的结果，再尝试与接下来的程序原语匹配；匹配成功时复用，省去一次 API 往返及重复上下文输入。它是<strong>推测</strong>，因为后续程序行为或模型输出可能与预期模板不符，节省效果依赖匹配成功率和提示设计。相对于重新发送长上下文，额外输出 token 也有成本。论文用 GPT-3.5 的三字段抽取测试报告输入 token 成本约降为三分之一；这是该实验的结果，不能直接推到所有 API 程序。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§5、§6.2</a></p>
+</section>
+<section id="evidence"><h3>实验与证据</h3>
+<p>论文主要在 NVIDIA A10G 24 GB 上评估开放权重模型：7B 模型使用单卡，更大模型使用多卡张量并行；另有 A100 80 GB 实验。吞吐量以大量程序实例运行时的<strong>程序实例数/秒</strong>计算；延迟是单个程序不批处理时，多次实例执行的平均时间。基线包括 vLLM 0.2.5、Guidance 0.1.8 和 LMQL 0.7.3，各自使用论文写明的后端。图 5–6 的主要结果使用单张 A10G 上的 Llama-7B。比较是系统及后端组合之间的比较，不能把全部差异归因于某一个优化。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§6.1–6.2、附录 C</a></p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>论文报告的观察</th>
+<th>测量条件与含义</th>
+<th>对应机制</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>最大吞吐量最高为基线的 6.4 倍，平均延迟最多降低 3.7 倍</td>
+<td>图 5–6，多种 Llama-7B 程序负载，各项为相应负载上的最好改善</td>
+<td>前缀复用、程序内并行和约束解码共同作用</td>
+</tr>
+<tr>
+<td>JSON 解码吞吐量提高 1.6 倍</td>
+<td>§6.3 的压缩 FSM 消融；预处理 FSM 后复用于请求批次</td>
+<td>跳过语法确定的连续文本</td>
+</tr>
+<tr>
+<td>管理 RadixAttention 数据结构用时 0.2 秒</td>
+<td>ShareGPT 100 个请求总计 74.3 秒，且无 KV 复用机会；管理时间占比低于 0.3%</td>
+<td>测量树管理自身的开销</td>
+</tr>
+<tr>
+<td>输入 token 成本约降为三分之一</td>
+<td>GPT-3.5、维基百科页面三字段抽取，使用少样本提示</td>
+<td>API 推测执行减少重复上下文输入</td>
+</tr>
+</tbody></table></div>
+<p>论文还报告：多轮短回复的复用收益较明显，因为省去的主要是前缀 prefill；长回复中生成阶段占比增加、不同会话共享较少，性能几乎没有改善。图 8 的消融分别移除树状缓存、缓存感知调度、前端并行等组件，支持“完整效果来自多项机制协作”的判断。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§6.2–6.3、图 8</a></p>
+</section>
+<section id="limitations"><h3>局限性</h3>
+<p>RadixAttention 需要真正相同且尚未被驱逐的 token 前缀。共享少、输出很长或显存主要被活动请求占用时，可复用 KV 减少，收益随之下降。缓存感知调度优先长前缀可能影响等待公平性；论文把与公平调度的结合留给后续工作。定理 3.1 约束的是离线批次、足够缓存容量等条件下的命中率，不保证在线服务的全局最优吞吐量。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，§3、§6.2</a></p>
+<p>压缩 FSM 的跳转需要处理字符与 token 切分不一致。论文附录 B.3 还指出，跳过确定路径可能改变某些候选的概率比较，尤其当候选文本长度和分词不同、某候选走压缩边而另一候选不走时。因此，1.6 倍是所测试 JSON 负载的吞吐提升，不能推为任意语法下完全相同的采样分布或速度。API 推测执行同样依赖后续原语与提前生成文本能够匹配；论文没有给出所有多调用任务的匹配率保证。<a class="inline-link" href="https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf">论文，附录 B.2–B.3、§5–6</a></p>
+</section>
+<section id="conclusion"><h3>结论</h3>
+<p>SGLang 的主线是让程序结构进入推理运行时：前端表达调用之间的依赖、分支与输出约束，后端据此识别共享前缀和确定文本。RadixAttention 处理可复用的历史计算，压缩 FSM 处理可跳过的确定生成，API 推测执行处理黑盒端点重复发送上下文。三者分别减少不同成本，是否有效取决于前缀共享程度、语法中的确定片段以及后续调用的可预测性。</p>
+</section>
+<!-- SGLANG_ARTICLE_END -->
+            <div class="reader-actions"><a href="../">← 返回论文阅读</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

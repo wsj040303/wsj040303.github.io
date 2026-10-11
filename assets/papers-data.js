@@ -8,6 +8,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "SGLang 论文阅读报告",
+    shortName: "SGLang",
+    aliases: ["SGLang: Efficient Execution of Structured Language Model Programs", "RadixAttention", "结构化语言模型程序", "压缩有限状态机"],
+    category: "inference",
+    year: "2024",
+    venue: "NeurIPS",
+    summary: "从多调用程序出发，解释 KV 缓存复用、约束解码和 API 推测执行。",
+    articleUrl: "sglang/",
+    url: "https://arxiv.org/abs/2312.07104"
+  },
+  {
     title: "Tensor Comprehensions 论文阅读报告",
     shortName: "Tensor Comprehensions / TC",
     aliases: ["Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions", "张量理解", "算子自动调优", "张量编译器"],

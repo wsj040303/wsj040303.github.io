@@ -1,4 +1,4 @@
-# SGLang 论文阅读报告
+# SGLang: Efficient Execution of Structured Language Model Programs
 
 本文精读 Zheng 等人在 NeurIPS 2024 发表的 *SGLang: Efficient Execution of Structured Language Model Programs*。重点是前端编程模型与运行时如何配合，以及论文中的三项优化：RadixAttention、压缩有限状态机和 API 推测执行。读者需要了解大语言模型的自回归生成；下文会从请求前缀解释 KV 缓存与约束解码。性能数字均为论文报告，本文没有复现实验。[论文原文](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 

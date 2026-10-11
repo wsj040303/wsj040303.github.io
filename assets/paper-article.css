@@ -1,5 +1,5 @@
 .article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
-.reader-heading h1 { font-size: clamp(36px, 3.7vw, 52px); letter-spacing: -.04em; }
+.reader-heading h1 { font-size: clamp(36px, 3.7vw, 52px); line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
 .chapter-panel { max-height: 100vh; overflow-y: auto; }
 .paper-article .paper-intro { margin-bottom: 34px; }
 .paper-article .paper-intro p { margin: 0; color: #354f3c; font-size: 14px; line-height: 1.9; }

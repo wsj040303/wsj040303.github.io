@@ -1,4 +1,4 @@
-# Tensor Comprehensions 论文阅读报告
+# Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions
 
 本文以 Nicolas Vasilache 等人的 2018 年论文 *Tensor Comprehensions: Framework-Agnostic High-Performance Machine Learning Abstractions*（下称 **TC 论文**）为主线，解释张量算子从数学定义到 GPU 内核的生成过程，以及自动调优在其中解决的问题。预备知识只需要矩阵乘法和基本循环；多面体编译、GPU 存储层次与性能测量在后文分别展开。文中的性能数字均来自论文报告，本文没有重新运行 TC 基准测试。[英文原文](https://arxiv.org/pdf/1802.04730)可在线阅读。
 

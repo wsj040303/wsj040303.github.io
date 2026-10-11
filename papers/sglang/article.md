@@ -6,6 +6,9 @@
 
 **语言模型程序**（LM program）用控制流组织多次模型调用，并处理结构化输入或输出。SGLang 为这类程序提供两个协作部分：嵌入 Python 的前端语言负责表示提示、生成、选择和并行分支；运行时负责执行模型请求，并利用调用之间的共享结构减少重复工作。
 论文的主要贡献大概有三项：
+1.RadixAttention：实现跨请求保留KV cache，采用树状多级前缀共享、LRU 驱逐与感知前缀等方案；
+2.
+
 
 [论文，§1–2、图 1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
@@ -53,7 +56,7 @@ SGLang 把提示状态放在变量 `s` 中。`s += ...` 追加文本或消息；
 
 ### RadixAttention 的跨调用前缀复用
 
-**基数树**（radix tree）是边可保存一段 token 序列的压缩前缀树。RadixAttention 在树中记录 token 前缀与对应 KV 张量的位置。新请求到来时，运行时查找最长可复用前缀：命中部分直接引用现有 KV，只对余下 token 计算 prefill；生成的新 token 也可以插入树中，供之后的请求使用。这样既覆盖同一程序的后续调用和 `fork` 分支，也覆盖不同程序实例。复用依据是实际 token 前缀，而非两段提示在自然语言上“意思相近”。[论文，§3、图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+**基数树**（radix tree）是边可保存一段 token 序列的压缩前缀树。RadixAttention 在树中记录 token 前缀与对应 KV 张量的位置。新请求到来时，运行时查找最长可复用前缀：命中部分直接引用现有 KV，只对余下 token 计算 prefill；生成的新 token 也可以插入树中，供之后的请求使用。这样既覆盖同一程序的后续调用和 `fork` 分支，也覆盖不同程序实例。[论文，§3、图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ![论文图 3：九个时刻中基数树的节点分裂、前缀复用、插入及叶节点驱逐](images/sglang-figure-3-radix-tree.png)
 
@@ -63,31 +66,37 @@ SGLang 把提示状态放在变量 `s` 中。`s += ...` 追加文本或消息；
 
 图 3 的后四步展示更深层共享：(6) 少样本请求进入树，与聊天请求没有公共 token 前缀，因此从根处分开；(7) 又有多个请求共享同一批少样本示例，示例之后的不同问题使节点 `e` 再次分裂；(8) 第一个聊天会话回来时，最近未使用的另一会话叶节点 `g`、`h` 让出空间；(9) 多个采样请求从相同的问题前缀产生不同答案，运行时保留公共路径，并驱逐较旧的叶分支。树上的每一次分叉都对应某处 token 首次不同；读图时沿根到节点的整条路径，才是该节点代表的完整前缀。[论文，图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-论文比较的常规处理方式会在**单条生成请求完成后**释放该请求的 KV；下一请求即使带有相同前缀，也要重算。RadixAttention 让完成请求留下的 KV 继续作为缓存候选。GPU 显存不足时，运行时按最近最少使用（LRU）策略从可驱逐的叶节点释放缓存；当前运行请求引用的节点有引用计数，引用数不为零时不能驱逐。先释放叶节点可以保住多个分支共享的祖先前缀。缓存和当前请求共用同一个内存池，所以当更多等待请求需要显存时，缓存空间会让位于运行中的批次。[论文，§3、图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+**RadixAttention的创新点在于：常规处理方式会在单条生成请求完成后释放该请求的 KV；下一请求即使带有相同前缀，也要重算。RadixAttention 让完成请求留下的 KV 继续作为缓存候选。只有直到 GPU 显存不足时，运行时才会按最近最少使用（LRU）策略从可驱逐的叶节点释放缓存。**[论文，§3、图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 基数树管理的是**token 路径到 KV 张量的映射**，并不要求整段 KV 在显存中连续排列。论文实现使用非连续的分页布局，每个页对应一个 token；树结构的元数据留在 CPU，KV 张量位于 GPU 的内存池。这样，树边能在共享前缀处分裂，而 KV 页仍可按原位置被多个请求引用。活跃请求使用的节点通过引用计数保护，引用数归零后才成为可驱逐候选。LRU 先驱逐叶子，因为若先丢弃共享祖先，多个子分支即使留在树中也失去了完整的可复用前缀。[论文，§3、图 3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-缓存命中率在论文中定义为“已缓存的提示 token 数 / 提示 token 总数”。它度量实际免去多少提示计算，比“有多少请求命中至少一个 token”更适合解释 prefill 的节省。例如两个请求都命中同一系统提示，其中一个提示总长 100 token、另一个总长 1000 token，命中 80 token 对两者的计算占比不同。[论文，§3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
-
-请求处理顺序决定缓存会不会在复用前被挤出。假设等待队列中两条请求都以 `P` 开头，第三条以不相关的 `Q` 开头；显存只能保留其中一组旧前缀。先处理两条 `P` 请求，可以在处理第二条时继续使用 `P`；中途切到 `Q` 则可能先驱逐 `P`，再为第二条重算。论文因此在批量场景优先安排**匹配前缀较长**的请求，而不是简单按到达先后处理。其定理 3.1 证明：对已知的离线请求批次，若缓存容量至少覆盖最长请求，按请求基数树深度优先访问可达到最优命中率；论文把最长共享前缀优先顺序与这种深度优先顺序对应起来。在线请求不断到达、生成长度无法预知时，调度不再拥有定理的完整条件；长期优先高命中请求还可能造成其他请求饥饿。[论文，§3、定理 3.1、附录 A.3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+请求处理顺序决定缓存会不会在复用前被挤出。假设等待队列中两条请求都以 `P` 开头，第三条以不相关的 `Q` 开头；显存只能保留其中一组旧前缀。先处理两条 `P` 请求，可以在处理第二条时继续使用 `P`；中途切到 `Q` 则可能先驱逐 `P`，再为第二条重算。论文因此在批量场景优先安排**匹配前缀较长**的请求，而不是简单按到达先后处理。其定理 3.1 证明：对已知的离线请求批次，若缓存容量至少覆盖最长请求，按请求基数树深度优先访问可达到最优命中率。[论文，§3、定理 3.1、附录 A.3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 因此，论文的贡献不宜概括为“首次跨请求复用 KV”。作者在相关工作中也列出了已有的部分复用方案。其系统设计是将**跨调用保留、树状多级前缀共享、LRU 驱逐与感知前缀的调度**结合，自动覆盖程序的动态共享模式。[论文，§3、§7](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ### 压缩有限状态机与确定文本
 
-结构化输出的 `regex` 先被转换为有限状态机（FSM）：状态表示当前已经匹配到的语法位置，转移表示下一段允许的字符或字符串。普通约束解码在每次模型预测后按当前状态屏蔽非法 token，再从合法 token 中选取下一个 token。这里的**一次 decode**指推动自回归生成的一次模型前向传播。普通运行时逐 token 推进，原因还包括 FSM 与模型执行器没有协同处理连续的确定文本；仅凭“掩码非法 token”本身不足以推出所有实现都只能逐 token 前进。[论文，§4、图 4、附录 B](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+结构化输出同时包含两类内容：有些由模型决定，例如摘要文字；有些由格式决定，例如 JSON 的键名、引号和冒号。SGLang 的 `regex` 参数把输出规则写成正则表达式，再转换为有限状态机（FSM）。FSM 的状态记录当前匹配到规则的哪个位置，状态之间的转移规定下一段允许出现的字符或字符串。模型负责在多个合法后续中选择，FSM 负责排除违反格式的选择。[论文，§4、附录 B](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+传统的 FSM 约束解码按 token 重复一个循环：模型执行一次前向传播，给出下一个 token 的概率；FSM 根据当前状态屏蔽不合法的 token；运行时从剩余 token 中选一个，再用它对应的文本更新 FSM 状态。这里“一次 decode”指为生成下一个 token 而执行的一次模型前向传播。即使格式规定此时只能输出固定文本，逐 token 的实现仍为这段文本中的每个 token 重复上述循环。论文将低效的原因归于 FSM 与模型执行器缺少协同处理连续确定文本的机制。[论文，§4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ![论文图 4：普通 FSM 与压缩 FSM 的状态、token 和模型前向传播对照](images/sglang-figure-4-fsm.png)
 
-*图 4：原文图 4 的四个子图。(a) 是逐字符转移，(b) 是压缩后的转移，(c) 与 (d) 比较生成同一段固定 JSON 前缀时需要的模型解码步骤；图中下划线代表空格。截取自 [Zheng 等，2024，原文图 4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=6)。*
+*图 4：同一段固定 JSON 前缀在传统 FSM 与压缩 FSM 中的状态转移和模型执行过程；下划线代表空格。截取自 [Zheng 等，2024，原文图 4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=6)。*
 
-图 4(a) 从状态 0 到 13，每一步消耗固定字符串 `{"summary": "` 的一个字符；(b) 把这一段只有唯一合法延续的路径合成一条边。图中蓝色方块是 FSM 状态，浅黄色框是模型最终使用的 token，绿色六边形 `LLM` 是一次模型前向传播。于是 (c) 的示意流程经过四个 `LLM` 节点，(d) 只经过一个；四与一描述这张示意图的分词和流程，实际节省的次数取决于具体 tokenizer 与约束路径。FSM 在字符层表示语法，模型却在 token 层计算，因而不能直接把图 4(a) 的 13 条字符边等同于 13 次模型调用。[论文，§4、图 4、附录 B](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+先看图 4 上半部分。(a) 从状态 0 到 13，逐字符匹配固定前缀 `{"summary": "`；到达每个中间状态时，下一个合法字符只有一个。(b) 将这串确定的转移合成一条长边，保留同样的起点和终点。下半部分把字符规则映射到模型使用的 token：浅黄色框是 token，绿色六边形 `LLM` 是模型前向传播。在图中的分词示例里，传统流程 (c) 为这段固定前缀经过四次 `LLM` decode，压缩流程 (d) 把确定片段集中处理，只显示一次前向传播。四与一是图中示例的次数；字符层的 13 条边并不等于 13 个模型 token。[论文，§4、图 4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-**单一转移边**指其源状态只有一个后继，且该边只接受唯一字符或字符串。压缩 FSM 把相邻的此类边合并成较长的确定片段。模型走到该片段时，运行时已知道接下来必须出现什么，于是通过 **jump forward** 把整段文本推进到后续状态，省去其中逐 token 采样与重复解码。论文图 4 中 `{"summary": "` 是示例：普通流程里的多个 `LLM decode` 节点表示该常量片段经历多次模型前向传播；压缩流程将它作为一段处理。重新进入模型解码前，还要用模型原有 tokenizer 对已有文本及跳过的片段重新分词，因为字符边界和 token 边界并不一一对应。[论文，§4、图 4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+压缩 FSM 的关键是识别“单一转移边”：一个状态只有一个后继，而且该边只接受唯一的字符或字符串。连续出现这种边，就意味着后续文本已被规则唯一确定。运行时可以执行 jump forward，沿合并后的长边推进，省去对确定片段逐 token 询问模型、屏蔽概率和采样的过程。当状态有多个合法后继时，模型仍须执行 decode 并选择；选定分支后若又进入连续的单一转移边，才能再次跳过确定片段。因此两种方法遵守同一条正则规则，区别在于如何执行规则已经确定的那部分输出。[论文，§4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-实现时，SGLang 先在**字符或字符串**层构造原始 FSM，再把连续单一转移并入压缩边。运行中，模型生成一个 token 后，运行时取得该 token 对应的字符串，匹配当前状态的出边；如果该出边后面已经压缩了一段唯一后续，就能跳到压缩边终点。压缩边的字符串仍须转回模型能接收的 token。论文附录 B.2 说明，直接把长字符串任意切分可能改变输入语义，因此实现用模型原有 tokenizer 对此前文本和压缩片段重新分词，再继续后续解码。压缩 FSM 节省的是**反复向模型询问已确定片段**的步骤，重新分词与继续计算仍有成本。[论文，附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+| 执行环节 | 传统 FSM 约束解码 | 本文的压缩 FSM |
+| --- | --- | --- |
+| 遇到多个合法后续 | 运行模型，屏蔽非法 token 后选择 | 同样运行模型并选择合法分支 |
+| 遇到连续的唯一合法后续 | 每生成一个 token，都再做一次模型 decode 和 FSM 检查 | 将确定路径压成一条边，jump forward 到后续状态 |
+| 处理完确定片段 | 停在片段结束状态，继续逐 token 解码 | 按模型 tokenizer 重新分词并处理确定文本，再从结束状态继续解码 |
 
-静态已知且由程序直接控制的字面量可以直接拼进提示；论文图 2 的 `"In summary,"` 就这样使用。压缩 FSM 更有价值的情形是**确定内容出现的位置要等运行时才知道**。例如生成形如 `{"summary": "<模型写的内容>", "grade": "<模型选的等级>"}` 的结果时，`summary` 写多长、何时结束由模型决定；一旦结束，JSON 的 `", "grade": "` 就成为语法规定的唯一后续。程序在生成前知道这段文本是什么，却不知道它应在第几个生成 token 后出现。FSM 在运行时跟踪当前语法状态，恰好能在分界出现后跳过固定片段。若语法允许可选字段，模型的选择还会决定之后哪一段固定键名或分隔符成为唯一后续；这类位置同样无法在生成前简单拼接。[论文，§2、§4、附录 B.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+图 4 的固定前缀在程序编写时就已知，直接拼接这段字面量也可以免去逐 token 生成；论文图 2 中的 `"In summary,"` 就是直接拼接的。压缩 FSM 更适合固定文本已知、但它出现的时刻取决于模型先前选择的情形。以 `{"summary": "<摘要>", "grade": "<等级>"}` 为说明用的结构：模型决定摘要内容和长度；当摘要结束，规则接着要求 `", "grade": "`。程序预先知道这段分隔符，却不知道它会在第几个生成 token 后出现。FSM 跟踪到分界时，压缩边让运行时跳过这段分隔符，随后模型继续决定等级。[论文，§2、§4、附录 B.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+跳过的固定文本仍要进入模型上下文，供后续 token 的注意力计算使用。FSM 的转移按字符或字符串构造，模型输入却按 token 切分；任意拆分压缩边的字符串可能产生不同的 token 序列。论文附录 B.2 因此要求用模型原有 tokenizer 对此前文本与压缩片段重新分词，再继续生成。图 4 的“一次前向传播”表示把确定片段集中处理，省掉逐 token 的解码轮次，并不表示固定片段完全不经过模型计算。论文讨论的概率分布偏差见下文“局限性”。[论文，附录 B.2–B.3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ### API 推测执行的调用合并
 

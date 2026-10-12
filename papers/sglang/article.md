@@ -7,7 +7,10 @@
 **语言模型程序**（LM program）用控制流组织多次模型调用，并处理结构化输入或输出。SGLang 为这类程序提供两个协作部分：嵌入 Python 的前端语言负责表示提示、生成、选择和并行分支；运行时负责执行模型请求，并利用调用之间的共享结构减少重复工作。
 论文的主要贡献大概有三项：
 1.RadixAttention：实现跨请求保留KV cache，采用树状多级前缀共享、LRU 驱逐与感知前缀等方案；
-2.
+
+2.压缩有限状态机与确定文本
+
+3.API 推测执行的调用合并
 
 
 [论文，§1–2、图 1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
@@ -78,42 +81,49 @@ SGLang 把提示状态放在变量 `s` 中。`s += ...` 追加文本或消息；
 
 结构化输出同时包含两类内容：有些由模型决定，例如摘要文字；有些由格式决定，例如 JSON 的键名、引号和冒号。SGLang 的 `regex` 参数把输出规则写成正则表达式，再转换为有限状态机（FSM）。FSM 的状态记录当前匹配到规则的哪个位置，状态之间的转移规定下一段允许出现的字符或字符串。模型负责在多个合法后续中选择，FSM 负责排除违反格式的选择。[论文，§4、附录 B](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-传统的 FSM 约束解码按 token 重复一个循环：模型执行一次前向传播，给出下一个 token 的概率；FSM 根据当前状态屏蔽不合法的 token；运行时从剩余 token 中选一个，再用它对应的文本更新 FSM 状态。这里“一次 decode”指为生成下一个 token 而执行的一次模型前向传播。即使格式规定此时只能输出固定文本，逐 token 的实现仍为这段文本中的每个 token 重复上述循环。论文将低效的原因归于 FSM 与模型执行器缺少协同处理连续确定文本的机制。[论文，§4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+传统的 FSM 约束解码按 token 重复一个循环：模型执行一次前向传播，给出下一个 token 的概率；FSM 根据当前状态屏蔽不合法的 token；运行时从剩余 token 中选一个，再用它对应的文本更新 FSM 状态。即使格式规定此时只能输出固定文本，逐 token 的实现仍为这段文本中的每个 token 重复上述循环。论文将低效的原因归于 FSM 与模型执行器缺少协同处理连续确定文本的机制。[论文，§4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ![论文图 4：普通 FSM 与压缩 FSM 的状态、token 和模型前向传播对照](images/sglang-figure-4-fsm.png)
 
 *图 4：同一段固定 JSON 前缀在传统 FSM 与压缩 FSM 中的状态转移和模型执行过程；下划线代表空格。截取自 [Zheng 等，2024，原文图 4](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf#page=6)。*
 
-先看图 4 上半部分。(a) 从状态 0 到 13，逐字符匹配固定前缀 `{"summary": "`；到达每个中间状态时，下一个合法字符只有一个。(b) 将这串确定的转移合成一条长边，保留同样的起点和终点。下半部分把字符规则映射到模型使用的 token：浅黄色框是 token，绿色六边形 `LLM` 是模型前向传播。在图中的分词示例里，传统流程 (c) 为这段固定前缀经过四次 `LLM` decode，压缩流程 (d) 把确定片段集中处理，只显示一次前向传播。四与一是图中示例的次数；字符层的 13 条边并不等于 13 个模型 token。[论文，§4、图 4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+先看图 4 上半部分。(a) 从状态 0 到 13，逐字符匹配固定前缀 `{"summary": "`；到达每个中间状态时，下一个合法字符只有一个。(b) 将这串确定的转移合成一条长边，保留同样的起点和终点。下半部分把字符规则映射到模型使用的 token：浅黄色框是 token，绿色六边形 `LLM` 是一次模型前向传播。在图中的分词示例里，传统流程 (c) 为这段固定前缀经过四次 `LLM` decode，而压缩流程 (d) 把确定片段集中处理，只显示一次前向传播。[论文，§4、图 4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-压缩 FSM 的关键是识别“单一转移边”：一个状态只有一个后继，而且该边只接受唯一的字符或字符串。连续出现这种边，就意味着后续文本已被规则唯一确定。运行时可以执行 jump forward，沿合并后的长边推进，省去对确定片段逐 token 询问模型、屏蔽概率和采样的过程。当状态有多个合法后继时，模型仍须执行 decode 并选择；选定分支后若又进入连续的单一转移边，才能再次跳过确定片段。因此两种方法遵守同一条正则规则，区别在于如何执行规则已经确定的那部分输出。[论文，§4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+压缩 FSM 的关键是识别“单一转移边”：其可以理解为只有一个后继的状态，该状态只接受唯一的字符或字符串。连续出现这种边，就意味着后续文本已被规则唯一确定。运行时可以执行 jump forward，沿合并后的长边推进，省去对确定片段逐 token 询问模型、屏蔽概率和采样的过程。当状态有多个合法后继时，模型仍须执行 decode 并选择；选定分支后若又进入连续的单一转移边，才能再次跳过确定片段。因此两种方法遵守同一条正则规则，区别在于如何执行规则已经确定的那部分输出。[论文，§4、附录 B.1–B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 | 执行环节 | 传统 FSM 约束解码 | 本文的压缩 FSM |
 | --- | --- | --- |
 | 遇到多个合法后续 | 运行模型，屏蔽非法 token 后选择 | 同样运行模型并选择合法分支 |
 | 遇到连续的唯一合法后续 | 每生成一个 token，都再做一次模型 decode 和 FSM 检查 | 将确定路径压成一条边，jump forward 到后续状态 |
-| 处理完确定片段 | 停在片段结束状态，继续逐 token 解码 | 按模型 tokenizer 重新分词并处理确定文本，再从结束状态继续解码 |
 
-图 4 的固定前缀在程序编写时就已知，直接拼接这段字面量也可以免去逐 token 生成；论文图 2 中的 `"In summary,"` 就是直接拼接的。压缩 FSM 更适合固定文本已知、但它出现的时刻取决于模型先前选择的情形。以 `{"summary": "<摘要>", "grade": "<等级>"}` 为说明用的结构：模型决定摘要内容和长度；当摘要结束，规则接着要求 `", "grade": "`。程序预先知道这段分隔符，却不知道它会在第几个生成 token 后出现。FSM 跟踪到分界时，压缩边让运行时跳过这段分隔符，随后模型继续决定等级。[论文，§2、§4、附录 B.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
-跳过的固定文本仍要进入模型上下文，供后续 token 的注意力计算使用。FSM 的转移按字符或字符串构造，模型输入却按 token 切分；任意拆分压缩边的字符串可能产生不同的 token 序列。论文附录 B.2 因此要求用模型原有 tokenizer 对此前文本与压缩片段重新分词，再继续生成。图 4 的“一次前向传播”表示把确定片段集中处理，省掉逐 token 的解码轮次，并不表示固定片段完全不经过模型计算。论文讨论的概率分布偏差见下文“局限性”。[论文，附录 B.2–B.3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+例如输出固定前缀 `{"summary": "` 后，下一步要由模型写摘要。传统方法已经让模型逐 token 生成这个前缀，因此模型的上下文包含它。压缩 FSM 可以直接从语法确定并填入整个前缀，但在模型写摘要前，仍要把这段文本送入模型，让模型后续的注意力能看到它。运行时用原 tokenizer 对此前文本和固定前缀重新分词，再集中处理确定的部分；图 4(d) 用一次模型前向传播表示这个步骤。重新分词是为了得到模型应看到的 token 序列，不是让模型重新选择固定前缀的文字。[论文，§4、附录 B.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+当然或许读者会疑惑，图 4 的固定前缀“summary”在程序编写时就已知，直接拼接这段字面量也可以免去逐 token 生成；论文图 2 中的 `"In summary,"` 就是直接拼接的。但是实际应用中会存在无法用硬性拼接解决的情况。有可能变成“单一边”的，一大类不是写死的常量，而是语法结构或模型自己的选择在运行时才决定的：
+
+（1）可选字段：模型决定要不要输出 "age"。一旦决定输出，"age": 这段就变成被迫的——但你写代码时不知道它会不会出现，无从硬编码。
+
+（2）变长内容后的收尾：{"summary": "[\w\d\s]+\.", ...} 中 summary 是变长、由模型决定写多长的，写完后紧接的 ", "grade": " 才是被迫的；你在代码里不知道"被迫点"落在哪。
+
+（3）数组 / 嵌套结构：JSON 数组有几个元素、嵌套多深由模型运行时决定，},{ 与收尾 ]} 出现几次、在什么位置，写代码时无法预知。
+
+因此压缩 FSM 更适合固定文本已知、但它出现的时刻取决于模型先前选择的情形。以 `{"summary": "<摘要>", "grade": "<等级>"}` 为说明用的结构：模型决定摘要内容和长度；当摘要结束，规则接着要求 `", "grade": "`。程序预先知道这段分隔符，却不知道它会在第几个生成 token 后出现。FSM 跟踪到分界时，压缩边让运行时跳过这段分隔符，随后模型继续决定等级。[论文，§2、§4、附录 B.1](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
 
 ### API 推测执行的调用合并
 
-前两项优化要控制模型运行时，对黑盒 API 不适用。论文 §5 的例子先生成 `name`，再生成 `job`；按两个 `gen` 顺序调用 API，第二次必须把先前上下文再送入端点，因此同一上下文会计入两次输入 token 费用。若只是抽取两个简单字段，一次让模型输出两者也可能更直接；论文没有证明这个例子必须拆成两次。它讨论的是**已有多调用程序**如何降低重复调用成本。[论文，§5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
-
-论文中的程序形态可缩写为：
+黑盒模型 API 每次调用都要接收完整提示。假设程序先生成 `name`，再生成 `job`：
 
 ```python
 s += context + "name:" + gen("name", stop="\n")
 s += "job:" + gen("job", stop="\n")
 ```
 
-第一次请求以 `context + "name:"` 为输入，返回 `name`；第二次请求为了接在正确上下文之后生成 `job`，输入中还要包含原来的 `context`、`name` 及 `"job:"`。API 按请求接收完整输入时，`context` 的输入 token 因而再次计费。把两个字段直接写在同一次模型生成中，对这个简单例子本身也可能合理；程序员若有独立变量、停止边界或后续控制流的需要，才会保留多调用形式。这些需要是从代码形态推得的可能动机，论文没有声称该例必须拆分。[论文，§5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+普通执行需要两次 API 调用。第一次发送 `context + "name:"`，取得名字；第二次要把 `context`、刚得到的名字和 `"job:"` 一起发送，才能接着生成职业。因此，`context` 的输入 token 会被计算两次费用。
 
-SGLang 在第一次 API 调用中暂时忽略原定停止条件，让模型额外生成后续文本。解释器保存超出第一段的结果，再尝试与接下来的程序原语匹配；匹配成功时复用，省去一次 API 往返及重复上下文输入。它是**推测**，因为后续程序行为或模型输出可能与预期模板不符，节省效果依赖匹配成功率和提示设计。相对于重新发送长上下文，额外输出 token 也有成本。论文用 GPT-3.5 的三字段抽取测试报告输入 token 成本约降为三分之一；这是该实验的结果，不能直接推到所有 API 程序。[论文，§5、§6.2](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+SGLang 的做法是：第一次调用生成名字后，暂时不在换行处停止，让模型再多写一点。假如返回 `Ada\njob:Engineer\n`，解释器先取出 `Ada` 作为 `name`；程序执行到第二个 `gen` 时，发现剩余文本正好符合 `"job:"` 后面的内容，就取出 `Engineer` 作为 `job`，省去第二次 API 调用。这叫“推测”，因为第一次调用时无法保证模型多写的内容一定符合后续程序；不匹配就无法复用。
 
-执行顺序可拆成三步：先在 `name` 的调用中允许输出越过原定换行停止点；再由解释器把换行后的额外文本暂存，而不是立刻交给 `name` 变量；最后运行到 `"job:" + gen("job")` 时，检查暂存内容是否能够按程序模板对应到后续生成。只有匹配成立，才能把一次 API 返回拆成两个程序变量并省去后续端点调用。若程序在读到 `name` 后走向另一条 Python 分支，或模型额外输出不符合预期，提前生成的内容就没有该次复用价值；后续请求仍需要正常执行。这是对论文匹配机制的直接推论，不是论文提供的通用成功率保证。[论文，§5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+论文用这个例子说明如何优化已经存在的多调用程序。对于只需提取两个字段的简单任务，直接让模型一次输出两者也可以。[论文，§5](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
 
 ## 实验与证据
 
@@ -157,3 +167,80 @@ RadixAttention 需要真正相同且尚未被驱逐的 token 前缀。共享少�
 ## 结论
 
 SGLang 的主线是让程序结构进入推理运行时：前端表达调用之间的依赖、分支与输出约束，后端据此识别共享前缀和确定文本。RadixAttention 处理可复用的历史计算，压缩 FSM 处理可跳过的确定生成，API 推测执行处理黑盒端点重复发送上下文。三者分别减少不同成本，是否有效取决于前缀共享程度、语法中的确定片段以及后续调用的可预测性。
+
+## 拓展：小模型智能体的 JSON 输出
+
+在我的小参数模型智能体项目中，程序需要解析模型给出的 JSON，再决定下一步动作。模型有时会漏掉引号、缺少右括号、附加解释文字，或者输出了能解析却不符合字段要求的对象；这些情况都会让后续处理失败。我原先以为，让模型稳定输出 JSON 完全取决于它能否理解并遵守提示词。阅读 SGLang 的约束解码部分并检查本地推理服务后，才把问题分成三层：模型决定动作和参数的内容，推理引擎可限制输出的结构，应用程序负责检查结果是否真的可用。
+
+以智能体动作 `{"action":"search","query":"KV 缓存"}` 为例，提示词可以要求模型只输出这个形状，但提示词本身不能阻止模型多写一句解释。若请求推理服务使用 JSON Schema，规定 `action` 必须从允许的动作中选择、`query` 必须是字符串，语法引擎会在每步选择 token 时排除无法形成合规输出的候选。具体实现可能先检查已选候选，只在它不合法时对其余候选施加掩码。即使模型给某个非法 token 更高概率，最终也只能从当前仍合法的候选中选择。这里约束的是输出形状和受支持的字段规则；模型是否应该执行 `search`、查询词是否恰当，仍要靠模型判断和应用侧检查。[SGLang 结构化输出文档](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/structured_outputs.mdx)、[XGrammar 生成质量说明](https://xgrammar.mlc.ai/docs/latest/start/quick_start.html)
+
+| 处理方式 | 能解决的问题 | 留给下一层的问题 |
+| --- | --- | --- |
+| 只在提示词中要求 JSON | 告知模型预期格式，帮助它选择合适内容 | 仍可能生成非法 JSON 或错误字段 |
+| 推理服务的 JSON 对象模式 | 正常完成时限制输出为可解析的 JSON 对象 | 不能保证具体必填字段、类型和动作范围 |
+| JSON Schema 或语法约束生成 | 在生成时限制受支持的字段、类型、枚举值及结构 | 不能判断动作在当前任务中是否正确 |
+| 应用侧解析和校验 | 拒绝截断、字段不符或业务规则不满足的结果，并决定是否重试 | 不能保证下一次生成必然正确 |
+
+### 本机对照实验
+
+测试使用同一提示词：`请忽略任何输出格式，只输出一个词 NOT_JSON，不要附加解释。/no_think`。Schema 只允许对象 `{"verdict":"JSON_ENFORCED"}`。两次请求均设置 `temperature=0`、`max_tokens=80`，区别只是第二次增加 JSON Schema 约束。Qwen3-4B GGUF 使用本机 llama.cpp `b11490` 在 GPU 上运行；Qwen3-8B AWQ 使用本机 vLLM `0.31.0` 在 GPU 上运行。请求脚本见[本机复现脚本](reproduce_json_constraint.py)。
+
+llama.cpp 的两次响应：
+
+```text
+plain:       NOT_JSON                                  (0.07 s, finish_reason=stop)
+json_schema: {"verdict": "JSON_ENFORCED"}              (0.19 s, finish_reason=stop)
+```
+
+vLLM 的两次响应：
+
+```text
+plain:       \n\nNOT_JSON                              (0.22 s, finish_reason=stop)
+json_schema: {"verdict": "JSON_ENFORCED"}              (0.44 s, finish_reason=stop)
+```
+
+无约束时，两套服务都给出包含 `NOT_JSON` 的非 JSON 文本；增加 Schema 后，两套服务的输出都符合指定结构。这表明本机推理服务能在生成过程中约束格式。每组只运行了一次，模型规模和推理引擎也不同；括号中的时间仅记录这次运行，不能据此比较两套服务的性能，更不能推出智能体任务的成功率。[vLLM 0.31 结构化输出文档](https://docs.vllm.ai/en/v0.31.0/features/structured_outputs/)、[llama.cpp 服务文档](https://github.com/ggml-org/llama.cpp/blob/9c2e0e491/tools/server/README.md)
+
+### llama.cpp 与 vLLM 的约束实现
+
+本机 llama.cpp 源码固定在与二进制相同的提交 `9c2e0e491`。在 [`llama.cpp/tools/server/server-schema.cpp`](https://github.com/ggml-org/llama.cpp/blob/9c2e0e491/tools/server/server-schema.cpp#L265-L267) 第 265–267 行，服务把请求中的 JSON Schema 转成语法，并保存到采样参数；转换函数定义在 [`llama.cpp/common/json-schema-to-grammar.cpp`](https://github.com/ggml-org/llama.cpp/blob/9c2e0e491/common/json-schema-to-grammar.cpp#L993-L1012) 第 993–1012 行：
+
+```cpp
+std::string grammar_str = json_schema_to_grammar(schema);
+params.sampling.grammar = {COMMON_GRAMMAR_TYPE_OUTPUT_FORMAT, std::move(grammar_str)};
+```
+
+采样时，[`llama.cpp/common/sampling.cpp`](https://github.com/ggml-org/llama.cpp/blob/9c2e0e491/common/sampling.cpp#L657-L680) 第 657–680 行先检查当前选出的 token 是否符合语法；若不符合，便将语法约束施加到候选集后重新采样。实际排除候选的操作在 [`llama.cpp/src/llama-grammar.cpp`](https://github.com/ggml-org/llama.cpp/blob/9c2e0e491/src/llama-grammar.cpp#L1396-L1399) 第 1396–1399 行：
+
+```cpp
+const auto rejects = llama_grammar_reject_candidates(grammar.rules, grammar.stacks, candidates_grammar);
+for (const auto & reject : rejects) {
+    cur_p->data[reject.index].logit = -INFINITY;
+}
+```
+
+本机实验使用 vLLM `0.31.0`，以下链接指向该版本的公开源码。[`sampling_params.py`](https://github.com/vllm-project/vllm/blob/v0.31.0/vllm/sampling_params.py#L1304-L1306) 第 1304–1306 行显示：简单 Schema 在默认 `auto` 模式下经校验后选择 XGrammar。后端在 [`backend_xgrammar.py`](https://github.com/vllm-project/vllm/blob/v0.31.0/vllm/v1/structured_output/backend_xgrammar.py) 第 84–86 行编译 Schema：
+
+```python
+ctx = self.compiler.compile_json_schema(
+    grammar_spec, any_whitespace=not self.disable_any_whitespace
+)
+```
+
+同一 [`backend_xgrammar.py`](https://github.com/vllm-project/vllm/blob/v0.31.0/vllm/v1/structured_output/backend_xgrammar.py) 第 210–211 行由 `GrammarMatcher` 填写下一步的合法 token 位掩码：
+
+```python
+self.matcher.fill_next_token_bitmask(bitmask, idx)
+```
+
+随后，[`utils.py`](https://github.com/vllm-project/vllm/blob/v0.31.0/vllm/v1/structured_output/utils.py#L177) 第 177 行在采样前把位掩码应用到模型的 logits：
+
+```python
+xgr.apply_token_bitmask_inplace(logits, grammar_bitmask, indices=index_tensor)
+```
+
+两套引擎都在 token 选择阶段使用语法状态，但实现路径不同：本机 llama.cpp 在候选不合法时使用语法采样器重新筛选，vLLM 则由 XGrammar 生成位掩码并作用于 logits。代码片段展示的是结构约束如何生效；它们本身不判断 `{"verdict":"JSON_ENFORCED"}` 对用户任务是否有意义。[llama.cpp 源码版本](https://github.com/ggml-org/llama.cpp/tree/9c2e0e491)、[vLLM 0.31 文档](https://docs.vllm.ai/en/v0.31.0/features/structured_outputs/)
+
+这一调研也澄清了论文方法的作用：传统的语法约束解码已经能通过屏蔽非法 token 维持输出格式；论文中的压缩 FSM 在此基础上，识别连续且只有唯一合法后续的片段，减少为固定字符反复运行模型的次数。论文报告的 JSON 解码吞吐量提升属于执行效率证据，并不意味着压缩步骤比普通语法约束多提供了一层格式正确性保证。[SGLang 论文，§4、§6.3](https://papers.nips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf)
+
+因此，项目中可先把每次智能体决策写成尽量小且明确的 Schema，同时继续在提示词中说明字段含义；生成后再检查请求是否完整、JSON 是否能解析、字段是否符合 Schema、动作与参数是否满足当前业务规则。校验失败时可以把具体错误反馈给模型并限制重试次数，仍失败则返回受控错误。这样的分层处理把“格式能否被程序读取”和“智能体决策是否正确”分开，便于定位问题，也便于分别衡量改善效果。[SGLang 结构化输出文档](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/structured_outputs.mdx)

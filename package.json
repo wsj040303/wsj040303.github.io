@@ -11,7 +11,9 @@
     "build:cuda": "node scripts/render-cuda.mjs",
     "check:cuda": "node scripts/render-cuda.mjs --check",
     "build:vattention": "node scripts/render-vattention.mjs",
-    "check:vattention": "node scripts/render-vattention.mjs --check"
+    "check:vattention": "node scripts/render-vattention.mjs --check",
+    "build:flashattention": "node scripts/render-flashattention.mjs",
+    "check:flashattention": "node scripts/render-flashattention.mjs --check"
   },
   "devDependencies": {
     "marked": "16.4.2"

@@ -61,9 +61,9 @@ window.PAPER_ENTRIES = [
     category: "operators",
     year: "2022",
     venue: "NeurIPS",
-    summary: "用分块和 IO 开销的视角理解注意力算子的实现。",
-    url: "https://arxiv.org/abs/2205.14135",
-    sample: true
+    summary: "从分块、在线 Softmax 和反向重算出发，核对精确注意力的 IO 复杂度与实验结果。",
+    articleUrl: "flashattention/",
+    url: "https://arxiv.org/abs/2205.14135"
   },
   {
     title: "Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations",

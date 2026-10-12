@@ -1,0 +1,147 @@
+<!doctype html>
+<!-- Generated from article.md with npm run build:flashattention; edit the Markdown source. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="精读 FlashAttention 论文，理解分块、在线 Softmax、反向重算及 IO 性能证据。">
+    <meta name="theme-color" content="#0b2015">
+    <title>FlashAttention：以分块和在线 Softmax 减少精确注意力的显存访问 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/paper-article.css?v=toc-20261011">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a>
+          <a href="../../ai-infra/">AI Infra</a>
+          <a href="../" aria-current="page">论文阅读</a>
+          <a href="../../projects/">GitHub 项目</a>
+          <a href="../../resources/">推荐资料</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../">论文阅读</a><span>/</span>FlashAttention</nav>
+        <div class="reader-heading"><h1>FlashAttention：以分块和在线 Softmax 减少精确注意力的显存访问</h1><p class="article-deck">理解精确注意力如何通过分块与重算减少 HBM 读写。</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>文章目录</summary><nav aria-label="本文目录"><ol class="chapter-list">
+<!-- FLASHATTENTION_TOC_START -->
+<li><a href="#overview">主要工作</a></li>
+<li><a href="#background">研究背景</a></li>
+<li><a href="#problem">问题定义</a></li>
+<li><a href="#method">方法原理</a><ol class="chapter-sublist"><li><a href="#method-1">分块布局与循环顺序</a></li><li><a href="#method-2">在线 Softmax 与精确输出</a></li><li><a href="#method-3">反向重算与存储代价</a></li><li><a href="#method-4">IO 复杂度与适用条件</a></li></ol></li>
+<li><a href="#evidence">实验与证据</a><ol class="chapter-sublist"><li><a href="#evidence-1">片外读写与注意力耗时</a></li><li><a href="#evidence-2">训练时间、长上下文与模型指标</a></li></ol></li>
+<li><a href="#limitations">局限性</a></li>
+<li><a href="#conclusion">结论</a></li>
+<!-- FLASHATTENTION_TOC_END -->
+            </ol></nav></details>
+          </aside>
+          <article class="reader-content paper-article">
+<!-- FLASHATTENTION_ARTICLE_START -->
+<div class="paper-intro"><p>本文精读 Dao 等人的 <em>FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</em>（arXiv v2，2022），重点解释注意力矩阵为何造成显存读写、分块后如何保持 Softmax 的完整归一化、反向传播为何重算，以及论文的复杂度与实验分别支持什么结论。读者只需了解矩阵乘法和 Transformer 中 token 的基本含义。文中图表与数字均来自<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2">论文原文</a>，没有重新运行 GPU 基准测试。</p>
+</div>
+<section id="overview"><h3>主要工作</h3>
+<p>FlashAttention 是一种 <strong>IO 感知的精确注意力算法</strong>：它仍计算给定掩码及缩放规则下的 <code>softmax(QKᵀ)V</code>，但把查询、键和值分块，在 GPU 片上存储中生成并消费局部注意力分数，不把完整的 <code>N×N</code> 分数矩阵与概率矩阵写入高带宽显存（HBM）。片上存储容量小，无法容纳所有键时，算法以每行的最大值、指数和及部分输出为状态，逐块完成同一个 Softmax。训练时再根据输入和这些状态重算局部概率，避免为反向传播保存二次方大小的矩阵。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=2">论文，§1、§3.1、算法 1、附录 B</a></p>
+<p>论文给出前向算法的片外访问量 <code>Θ(N²d²/M)</code>：<code>N</code> 是序列长度，<code>d</code> 是单头维度，<code>M</code> 是以元素数计的片上存储容量；作为对照，文中的标准实现需要 <code>Θ(Nd+N²)</code> 次访问。这改变的是<strong>数据搬运量与中间结果占用</strong>，稠密精确注意力的主要矩阵乘法仍要处理 <code>N²</code> 对查询和键。论文在特定 A100、模型及基线条件下报告 BERT-large 端到端训练时间由 20.0 分钟降到 17.4 分钟，GPT-2 medium 由 Hugging Face 基线的 21.0 天降到 6.9 天。两个结果属于不同实验，不是一个通用加速系数。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">论文，定理 1–2、表 1–2</a></p>
+</section>
+<section id="background"><h3>研究背景</h3>
+<p>自注意力把长度为 <code>N</code> 的 token 表示 <code>X</code> 分别投影为查询 <code>Q=XW_Q</code>、键 <code>K=XW_K</code> 和值 <code>V=XW_V</code>。对一个注意力头，三者可记为 <code>N×d</code> 矩阵；它们的第 <code>j</code> 行都对应第 <code>j</code> 个输入位置，但承担不同的计算角色。第 <code>i</code> 个查询 <code>q_i</code> 与每个键 <code>k_j</code> 做点积，得到位置 <code>i</code> 对位置 <code>j</code> 的分数；沿 <code>j</code> 归一化之后，使用同一位置的值 <code>v_j</code> 作加权求和。因此，<strong>键和值按位置配对</strong>，而输出按查询位置排列。点积是可学习投影产生的打分方式，其有用的匹配关系由训练决定。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§2.2</a></p>
+<p>令 <code>s_ij = τ q_i·k_j</code>，其中 <code>τ</code> 是注意力缩放因子；可见位置的 <code>s_ij</code> 保留，掩码排除的位置取 <code>−∞</code>。于是第 <code>i</code> 行的输出为：</p>
+<div class="formula" role="math" aria-label="p_ij = exp(s_ij) / Σ_k exp(s_ik)；o_i = Σ_j p_ij v_j">p_ij = exp(s_ij) / Σ_k exp(s_ik)
+o_i = Σ_j p_ij v_j</div>
+<p>矩阵形式为 <code>S=τQKᵀ</code>、<code>P=softmax(S)</code>、<code>O=PV</code>，Softmax 按行计算。论文算法 1 为突出分块，把 <code>τ</code> 暂时省入分数定义；附录 B 的完整反向算法显式写出缩放、掩码和 Dropout。<code>P</code> 的列 <code>j</code> 与 <code>V</code> 的行 <code>j</code> 对齐，保证某个键得到的权重用于同位置的值。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§2.2、算法 1、附录 B.4</a></p>
+<p>GPU 的 HBM 容量大，片上静态随机存取存储器（SRAM，包括共享内存等可用于局部计算的片上资源）容量小但带宽高。论文以 A100 为例，列出 HBM 带宽约 1.5–2.0 TB/s、每个流多处理器 192 KB 片上 SRAM。这里的 <strong>IO</strong> 是 HBM 与片上存储之间的数据读写；<strong>FLOP</strong> 是浮点计算次数。减少 FLOP 不能单独保证运行时间下降：分数归一化、掩码和 Dropout 涉及对中间数据的读取、写回与再次读取，额外的索引和数据重排也可能形成开销。近似注意力通过稀疏、低秩等方式减少计算，是否快于高度优化的稠密实现仍需实测。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=2">论文，§1、§2.1、图 1</a></p>
+</section>
+<section id="problem"><h3>问题定义</h3>
+<p>论文的标准实现先算 <code>S=QKᵀ</code> 并把 <code>S</code> 写入 HBM，接着读 <code>S</code> 求 <code>P=softmax(S)</code> 并写回 <code>P</code>，最后再读 <code>P</code> 与 <code>V</code> 求 <code>O=PV</code>。<code>S</code>、<code>P</code> 都有 <code>N²</code> 个元素；训练反向传播还要使用中间概率。因而这个实现除输入和输出外，需要随序列长度平方增长的中间存储和显存访问。多头和批量处理会把这些成本乘上相应的头数与批量数。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§2.2、算法 0</a></p>
+<p>FlashAttention 要同时满足两项约束：前向不能预先看到一整行 <code>S</code>，却要得到对整行归一化后的精确输出；反向不能保存整张 <code>P</code>，却要能计算 <code>Q、K、V</code> 的梯度。<strong>精确</strong>在此指算法不因跳过注意力位置而改变所定义的稠密注意力运算；有限精度计算、归约次序与具体内核仍可能造成数值差异。论文另设的块稀疏扩展会跳过指定块，计算的是由稀疏掩码定义的注意力，不能与稠密精确版本的语义混同。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§3.1、§3.3、附录 B</a></p>
+</section>
+<section id="method"><h3>方法原理</h3>
+<h4 id="method-1">分块布局与循环顺序</h4>
+<p>算法 1 将 <code>Q</code> 按行切为 <code>B_r×d</code> 的块，将 <code>K、V</code> 按相同位置切为 <code>B_c×d</code> 的块。对一对块，只在片上形成 <code>B_r×B_c</code> 的局部分数 <code>S_ij=Q_iK_jᵀ</code>；当前块的指数权重立刻用于 <code>P̃_ijV_j</code>，随后可以释放局部分数。论文给出示意块大小 <code>B_c=⌊M/(4d)⌋</code>、<code>B_r=min(⌊M/(4d)⌋,d)</code>，以容纳输入块、局部分数和行状态；具体内核的取值还受硬件资源与性能权衡影响。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=5">论文，§3.1、算法 1</a></p>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图1-分块与HBM访问.png" aria-label="打开原尺寸论文图片"><img src="images/原文图1-分块与HBM访问.png" alt="原文图 1：片上 SRAM、HBM 以及 K/V 外循环和 Q 内循环的分块数据流" loading="lazy" decoding="async"></a><figcaption>图 1：左侧是内存层次；中间的红色外循环依次装入键/值块，蓝色内循环处理查询块，虚线框是仅在片上存在的局部分数；右侧给出论文的 GPT-2 注意力实现时间对照。截取自<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=2">Dao 等，2022，原文图 1</a>。</figcaption></figure>
+
+<p>沿图 1 中间的箭头看，外循环先将某个 <code>K_j、V_j</code> 从 HBM 搬到片上，内循环让它们依次与所有 <code>Q_i</code> 配对；每个 <code>Q_i</code> 的输出及行统计量更新后写回，等待下一个键/值块。<code>K_j</code> 和 <code>V_j</code> 同时装入是因为注意力权重必须乘对应位置的 <code>V_j</code>。<strong>键/值在外层是本算法的数据复用安排，并非注意力语义强制的唯一循环顺序</strong>：这样每个键/值块可跨多个查询块复用，代价是查询、部分输出与统计量随外循环多次读写。图右的柱形图只比较该图对应的 GPT-2 注意力计算时间，不代表整模型训练加速比。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=2">论文，图 1、算法 1 第 5–13 行</a></p>
+<h4 id="method-2">在线 Softmax 与精确输出</h4>
+<p>普通 Softmax 对一行分数 <code>x</code> 可稳定地写成 <code>m=max(x)</code>、<code>l=Σ_j exp(x_j−m)</code>、<code>p_j=exp(x_j−m)/l</code>。减去最大值不改变分子与分母的比值，并使每个指数的自变量不大于 0，降低上溢风险。分块时完整的 <code>m</code> 和 <code>l</code> 尚不可知，因此算法对每一行保存已处理键的最大值 <code>m_old</code>、指数和 <code>l_old</code> 与<strong>已经归一化的部分输出</strong> <code>O_old</code>；新块分别产生局部最大值 <code>m̃</code>、未归一化指数向量 <code>P̃=exp(S_block−m̃)</code> 和局部和 <code>l̃</code>。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§3.1、算法 1 第 9–12 行</a></p>
+<p>合并时，先取 <code>m_new=max(m_old,m̃)</code>。旧块与新块的指数都要改用这个共同基准，再相加：</p>
+<div class="formula" role="math" aria-label="l_new = exp(m_old−m_new) · l_old + exp(m̃−m_new) · l̃；O_new = [exp(m_old−m_new) · l_old · O_old；         + exp(m̃−m_new) · (P̃ V_block)] / l_new">l_new = exp(m_old−m_new) · l_old + exp(m̃−m_new) · l̃
+O_new = [exp(m_old−m_new) · l_old · O_old
+         + exp(m̃−m_new) · (P̃ V_block)] / l_new</div>
+<p><code>l_old·O_old</code> 把已归一化的旧输出还原为旧基准下的未归一化加权和。新块的 <code>P̃ V_block</code> 本身已经是未归一化加权和，<strong>无需再乘一次 <code>l̃</code></strong>。这两个量分别按最大值变化缩放后相加，最后除以共同的 <code>l_new</code>；数学上等于一次对全部已处理键计算 Softmax。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=5">论文，§3.1、算法 1 第 10–12 行</a></p>
+<p>一个<strong>解释性构造</strong>可以核对数值。设某一行的四个分数为 <code>[1,2,3,0]</code>，对应的标量值为 <code>[10,20,30,40]</code>，每块含两个键。第一块的 <code>m₁=2</code>、<code>l₁=e⁻¹+1≈1.3679</code>、未归一化加权和 <code>u₁=10e⁻¹+20≈23.6788</code>，所以部分输出 <code>O₁=u₁/l₁≈17.3106</code>。第二块的 <code>m̃₂=3</code>、<code>l̃₂=1+e⁻³≈1.0498</code>、<code>ũ₂=30+40e⁻³≈31.9915</code>。统一到最大值 3 后，<code>l_new=e⁻¹l₁+l̃₂≈1.5530</code>、<code>u_new=e⁻¹u₁+ũ₂≈40.7024</code>，得到 <code>O_new≈26.2089</code>。直接对四个分数一次求 Softmax，也得到 <code>(10e⁻²+20e⁻¹+30+40e⁻³)/(e⁻²+e⁻¹+1+e⁻³)≈26.2089</code>。这个算例用于解释公式，不是论文的输入或测量。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=4">论文，§3.1</a></p>
+<p>掩码可以在局部分数形成后、Softmax 之前施加：不允许的键位置设为 <code>−∞</code>，其指数贡献为零。Dropout 则作用于概率与值的乘积，并须在反向重算时重现同一随机掩码；论文附录的实现保存伪随机数生成器状态以满足这一点。分块不会让不同键位置脱离同一行的归一化，只改变生成概率和消费概率的时机。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=20">论文，附录 B.3–B.4</a></p>
+<h4 id="method-3">反向重算与存储代价</h4>
+<p>标准反向传播使用正向得到的 <code>P</code> 求梯度；若保存整张 <code>P</code>，二次方存储又会回来。FlashAttention 前向保留 <code>Q、K、V</code>、输出 <code>O</code> 以及每行 <code>m、l</code>。反向处理一对查询与键/值块时，重新计算该块分数和 <code>P_ij=exp(S_ij−m_i)/l_i</code>，再结合输出梯度 <code>dO_i</code> 求局部的 <code>dQ_i、dK_j、dV_j</code>，从始至终只让局部 <code>B_r×B_c</code> 概率块待在片上。使用 Dropout 时，还要根据正向的随机状态重现该块掩码。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=20">论文，§3.1、附录 B.2–B.4、算法 4</a></p>
+<p>以没有 Dropout 的一行为例，设 <code>g_i=dO_i</code>，则 <code>dV_j</code> 汇入 <code>p_ij g_i</code>；<code>dP_ij=g_i·v_j</code>；Softmax 的行归约项可由 <code>D_i=g_i·o_i</code> 得到，于是 <code>dS_ij=p_ij(dP_ij−D_i)</code>，再把 <code>dS</code> 经两次矩阵乘法传给 <code>Q、K</code>。这些量只依赖当前块与保留的行统计量，所以不需要从 HBM 读取整张概率矩阵。重算增加浮点操作，但它换掉了大量 HBM 读写；是否更快由设备与负载的计算/搬运平衡决定。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=19">论文，附录 B.2、算法 4</a></p>
+<h4 id="method-4">IO 复杂度与适用条件</h4>
+<p>以论文算法 1 的循环计算，<code>K、V</code> 各块在外循环装入；约有 <code>T_c≈N/B_c≈Nd/M</code> 个键/值块。对每个外循环，<code>Q</code>、部分输出和行统计量合计需要 <code>Θ(Nd)</code> 量级的 HBM 访问，于是主项为 <code>Θ(T_c·Nd)=Θ(N²d²/M)</code>。这里数的是<strong>元素访问次数</strong>，不是字节；换算为字节还需考虑数据类型，不能直接把 <code>M</code> 代成以 KB 计的 SRAM 容量。论文定理 2 的形式适用于 <code>d≤M≤Nd</code> 的模型区间；当 <code>M</code> 足以容纳更大块时，重复扫描次数随之减少。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">论文，§3.2、定理 2</a></p>
+<p>定理 1 给出的额外存储为 <code>O(N)</code>，指<strong>在输入 <code>Q、K、V</code> 和输出 <code>O</code> 之外</strong>的行最大值、行和等状态；输入输出自身仍有 <code>O(Nd)</code> 个元素。反向的梯度张量也各占 <code>O(Nd)</code>。因此，对固定头维度 <code>d</code>，注意力相关的中间存储随 <code>N</code> 线性增长，而不是整个 Transformer 的所有显存占用都成为 <code>O(N)</code>。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=5">论文，定理 1、附录 B.4</a></p>
+<p>论文命题 3 的下界有明确量词：<strong>不存在一种算法在该区间的所有 <code>M</code> 上都达到 <code>o(N²d²/M)</code> 次片外访问</strong>。证明取 <code>M=Θ(Nd)</code> 时至少必须读入或写出 <code>Ω(Nd)</code> 个元素。这一论证不能单独推出“对每一个固定的 <code>M</code>，FlashAttention 都达到逐点最优下界”；论文也把更细的参数化下界列为后续工作。此区分影响对“IO 最优”的理解。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">论文，§3.2、命题 3</a></p>
+</section>
+<section id="evidence"><h3>实验与证据</h3>
+<h4 id="evidence-1">片外读写与注意力耗时</h4>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图2-IO与运行时间.png" aria-label="打开原尺寸论文图片"><img src="images/原文图2-IO与运行时间.png" alt="原文图 2：标准注意力与 FlashAttention 的 FLOP、HBM 读写量、耗时及块大小影响" loading="lazy" decoding="async"></a><figcaption>图 2：左表比较计算量、HBM 读写量与正反向耗时；中图比较块大小对前向 HBM 访问和运行时间的影响；右图比较块稀疏比例与正反向运行时间。截取自<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">Dao 等，2022，原文图 2</a>。</figcaption></figure>
+
+<p>图 2 左表的条件是 A100 上的 GPT-2 medium 注意力，序列长度 1024、头维度 64、16 个头、批量 64，计入前向与反向。标准实现与 FlashAttention 分别为 <strong>66.6 与 75.2 GFLOPs</strong>、<strong>40.3 与 4.4 GB HBM 读写</strong>、<strong>41.7 与 7.3 ms</strong>。同一设置下，FlashAttention 计算量增加约 13%，HBM 读写量却约为原来的九分之一，耗时约为原来的六分之一；该对照支持论文提出的 IO 瓶颈解释，但不意味着任何设备与长度上都必然更快。图中间随块大小增大，HBM 访问和耗时先下降；当片上容量、计算或其他成本成为限制时，继续增大块不能无限加速。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">论文，§3.2、图 2</a></p>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图3-运行时间与内存.png" aria-label="打开原尺寸论文图片"><img src="images/原文图3-运行时间与内存.png" alt="原文图 3：不同序列长度下注意力正反向耗时和注意力内存占用" loading="lazy" decoding="async"></a><figcaption>图 3：左图横轴为序列长度、纵轴为前向加反向耗时；右图横轴为序列长度、纵轴为注意力相关内存占用。截取自<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=9">Dao 等，2022，原文图 3</a>。</figcaption></figure>
+
+<p>图 3 左侧的黑色点线是稠密 FlashAttention，蓝色和橙色分别是 PyTorch 与 Megatron 注意力；绿色虚线为块稀疏扩展。短序列时，黑线在几条近似或稀疏方法的曲线之下，尽管稠密方法的渐近计算量更高；约在 512–1024 token 的区间，一些近似曲线开始与它交叉。右侧黑色点线随长度近似线性增长，而若干需要二次方中间矩阵的实现更早耗尽这次测试的 40 GB A100 显存。图示只覆盖这里的实现、设备与批量条件，也只量“注意力相关内存”，不能据此推断完整训练的总显存曲线。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=9">论文，§4.3、图 3</a></p>
+<h4 id="evidence-2">训练时间、长上下文与模型指标</h4>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>实验与指标</th>
+<th>基线</th>
+<th>FlashAttention 结果</th>
+<th>解释范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>BERT-large 达到 72.0% 掩码语言模型目标准确率；8×A100，10 次平均训练时间</td>
+<td>NVIDIA MLPerf 1.1：20.0 ± 1.5 分钟</td>
+<td>17.4 ± 1.4 分钟</td>
+<td>同一初始化与目标下，时间缩短约 13%；论文以训练速度快约 15% 表述。</td>
+</tr>
+<tr>
+<td>GPT-2 medium，OpenWebText 困惑度与训练时间；8×A100</td>
+<td>Hugging Face：14.2、21.0 天；Megatron-LM：14.3、11.5 天</td>
+<td>14.3、6.9 天</td>
+<td>注意力实现加速了端到端训练；此处没有因更换注意力实现而改善困惑度。</td>
+</tr>
+<tr>
+<td>GPT-2 small，OpenWebText 上下文长度与困惑度；8×A100</td>
+<td>Megatron-LM，1K：18.2、4.7 天</td>
+<td>FlashAttention，4K：17.5、3.6 天</td>
+<td>上下文从 1K 增至 4K 与困惑度下降同时发生，不能把 0.7 的改善归于固定计算规则下的内核替换。</td>
+</tr>
+</tbody></table></div>
+<p>表中数字来自论文<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=7">表 1</a>及<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=8">表 2、表 4</a>。<strong>困惑度</strong>（perplexity，PPL）是对真实后续 token 的平均负对数概率取指数；若评估集有 <code>L</code> 个预测位置，则 <code>PPL=exp(−(1/L)Σ_t log p(w_t|w_&lt;t))</code>。在同一数据和评估方式下，数值越低表示模型对真实 token 分配的概率整体越高。生成采样时的温度是另一项设置；简单降低温度会重新分配各 token 的概率，却不保证每个真实 token 的概率都上升，因此不能把调温当作表 4 困惑度改善的解释。表 2 中同为 1K 上下文的不同实现困惑度接近，表 4 的 4K 结果则伴随可使用的上下文增加。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=8">论文，§4.1–4.2、表 2、表 4</a></p>
+<p>论文的长文档分类进一步显示上下文长度与任务指标的关系：MIMIC-III 的 micro-F1 从长度 512 的 52.8 升到长度 16K 的 57.1；ECtHR 从长度 512 的 72.2 升到长度 8K 的 80.7。Path-X（16K）中稠密 FlashAttention 达到 <strong>61.4% 准确率</strong>；Path-256（64K）中块稀疏版本达到 <strong>63.1%</strong>。这些是模型、数据与训练设置下的任务结果，既包含更长上下文带来的信息，也包含具体训练方案，不能等同于算子单独提升了模型质量。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=9">论文，§4.2、表 5–6</a></p>
+</section>
+<section id="limitations"><h3>局限性</h3>
+<p>稠密 FlashAttention 减少片外读写与中间存储，却仍计算所有允许的查询–键配对，时间主项仍随序列长度平方增长。真正跳过配对的块稀疏 FlashAttention 需要预先给定稀疏掩码；若非零块比例为 <code>s</code>，论文给出 <code>Θ(Nd+N²d²s/M)</code> 的访问量。它的输出精确对应<strong>该稀疏掩码定义的注意力</strong>，与不加稀疏掩码的稠密注意力不同。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=6">论文，§3.3、命题 4</a></p>
+<p>片上容量、线程资源与块大小限制了可直接应用的分块形状；论文图 2 已展示访问下降后运行时间受其他因素制约。作者还指出，针对新的注意力变体编写 CUDA 内核需要较多工程工作，实现在不同 GPU 架构之间可能需要调整；单 GPU 的 HBM–SRAM IO 分析也没有计入多 GPU 通信。本文依据论文中的 A100 实验判断其结果，没有复现其他设备、框架版本或推理服务负载的性能。<a class="inline-link" href="https://arxiv.org/pdf/2205.14135v2#page=10">论文，§3.2、§5</a></p>
+</section>
+<section id="conclusion"><h3>结论</h3>
+<p>FlashAttention 把注意力的性能问题从“只减少算术运算”扩展为“同时安排片上计算与 HBM 读写”：分块只临时生成局部分数，在线 Softmax 用最大值、指数和与部分输出维持整行归一化，反向重算局部概率而不保存整张矩阵。论文的定理给出所述内存模型下的访问量，A100 实验展示计算量可略增而注意力耗时下降；端到端训练和长上下文任务结果则说明这种算子优化在特定模型与负载中能转化为实际收益。评估其他场景时，仍需分别核对序列长度、头维度、片上容量、掩码、数值精度和对照实现。</p>
+</section>
+<!-- FLASHATTENTION_ARTICLE_END -->
+            <div class="reader-actions"><a href="../">← 返回论文阅读</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

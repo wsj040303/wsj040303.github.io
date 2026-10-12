@@ -14,6 +14,7 @@ window.PAPER_ENTRIES = [
     category: "inference",
     year: "2024",
     venue: "MLSys",
+    rating: 3.5,
     summary: "解释激活感知缩放、量化误差条件与 TinyChat 的设备端加速证据。",
     articleUrl: "awq/",
     url: "https://arxiv.org/abs/2306.00978"

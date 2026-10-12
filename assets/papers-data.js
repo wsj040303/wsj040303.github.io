@@ -50,6 +50,7 @@ window.PAPER_ENTRIES = [
     category: "inference",
     year: "2023",
     venue: "SOSP",
+    rating: 4.5,
     summary: "解析 KV 缓存分页、块表共享与抢占调度，并核对吞吐实验的适用边界。",
     articleUrl: "pagedattention/",
     url: "https://arxiv.org/abs/2309.06180"

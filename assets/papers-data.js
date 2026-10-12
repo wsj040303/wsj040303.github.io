@@ -8,6 +8,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration",
+    shortName: "AWQ",
+    aliases: ["激活感知权重量化", "TinyChat", "W4A16", "权重低比特量化"],
+    category: "inference",
+    year: "2024",
+    venue: "MLSys",
+    summary: "解释激活感知缩放、量化误差条件与 TinyChat 的设备端加速证据。",
+    articleUrl: "awq/",
+    url: "https://arxiv.org/abs/2306.00978"
+  },
+  {
     title: "vAttention: Dynamic Memory Management for Serving LLMs without PagedAttention",
     shortName: "vAttention",
     aliases: ["连续虚拟 KV 缓存", "CUDA VMM", "动态显存管理"],

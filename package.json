@@ -13,7 +13,9 @@
     "build:vattention": "node scripts/render-vattention.mjs",
     "check:vattention": "node scripts/render-vattention.mjs --check",
     "build:flashattention": "node scripts/render-flashattention.mjs",
-    "check:flashattention": "node scripts/render-flashattention.mjs --check"
+    "check:flashattention": "node scripts/render-flashattention.mjs --check",
+    "build:awq": "node scripts/render-awq.mjs",
+    "check:awq": "node scripts/render-awq.mjs --check"
   },
   "devDependencies": {
     "marked": "16.4.2"

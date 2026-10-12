@@ -62,6 +62,7 @@ window.PAPER_ENTRIES = [
     category: "operators",
     year: "2022",
     venue: "NeurIPS",
+    rating: 5,
     summary: "从分块、在线 Softmax 和反向重算出发，核对精确注意力的 IO 复杂度与实验结果。",
     articleUrl: "flashattention/",
     url: "https://arxiv.org/abs/2205.14135"

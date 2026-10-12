@@ -7,7 +7,9 @@
     "build:sglang": "node scripts/render-sglang.mjs",
     "check:sglang": "node scripts/render-sglang.mjs --check",
     "build:cuda": "node scripts/render-cuda.mjs",
-    "check:cuda": "node scripts/render-cuda.mjs --check"
+    "check:cuda": "node scripts/render-cuda.mjs --check",
+    "build:vattention": "node scripts/render-vattention.mjs",
+    "check:vattention": "node scripts/render-vattention.mjs --check"
   },
   "devDependencies": {
     "marked": "16.4.2"

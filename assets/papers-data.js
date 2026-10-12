@@ -8,6 +8,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "vAttention: Dynamic Memory Management for Serving LLMs without PagedAttention",
+    shortName: "vAttention",
+    aliases: ["连续虚拟 KV 缓存", "CUDA VMM", "动态显存管理"],
+    category: "inference",
+    year: "2025",
+    venue: "ASPLOS",
+    summary: "用连续虚拟张量和按需物理页映射管理 KV 缓存，并核对长上下文性能证据。",
+    articleUrl: "vattention/",
+    url: "https://arxiv.org/abs/2405.04437"
+  },
+  {
     title: "SGLang: Efficient Execution of Structured Language Model Programs",
     shortName: "SGLang",
     aliases: ["SGLang: Efficient Execution of Structured Language Model Programs", "RadixAttention", "结构化语言模型程序", "压缩有限状态机"],

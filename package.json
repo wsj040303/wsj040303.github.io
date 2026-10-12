@@ -6,6 +6,8 @@
     "check:tc": "node scripts/render-tc.mjs --check",
     "build:sglang": "node scripts/render-sglang.mjs",
     "check:sglang": "node scripts/render-sglang.mjs --check",
+    "build:pagedattention": "node scripts/render-pagedattention.mjs",
+    "check:pagedattention": "node scripts/render-pagedattention.mjs --check",
     "build:cuda": "node scripts/render-cuda.mjs",
     "check:cuda": "node scripts/render-cuda.mjs --check",
     "build:vattention": "node scripts/render-vattention.mjs",

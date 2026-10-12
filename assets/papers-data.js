@@ -45,13 +45,13 @@ window.PAPER_ENTRIES = [
   {
     title: "Efficient Memory Management for Large Language Model Serving with PagedAttention",
     shortName: "vLLM / PagedAttention",
-    aliases: ["大模型推理显存管理"],
+    aliases: ["大模型推理显存管理", "KV 缓存", "分页注意力", "写时复制"],
     category: "inference",
     year: "2023",
     venue: "SOSP",
-    summary: "从 KV Cache 的显存管理入手，理解大模型推理服务的吞吐问题。",
-    url: "https://arxiv.org/abs/2309.06180",
-    sample: true
+    summary: "解析 KV 缓存分页、块表共享与抢占调度，并核对吞吐实验的适用边界。",
+    articleUrl: "pagedattention/",
+    url: "https://arxiv.org/abs/2309.06180"
   },
   {
     title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",

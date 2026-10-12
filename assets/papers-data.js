@@ -14,6 +14,7 @@ window.PAPER_ENTRIES = [
     category: "inference",
     year: "2025",
     venue: "ASPLOS",
+    rating: 4.5,
     summary: "用连续虚拟张量和按需物理页映射管理 KV 缓存，并核对长上下文性能证据。",
     articleUrl: "vattention/",
     url: "https://arxiv.org/abs/2405.04437"

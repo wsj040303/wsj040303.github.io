@@ -10,7 +10,7 @@
 
 ## 研究背景
 
-推理请求先经历**预填充**（prefill）：并行处理输入提示，建立各位置的 KV；随后进入**解码**（decode）：每轮使用已有 KV 生成下一个 token，并将新 token 的 KV 追加到缓存。若一个请求需要容纳的最大上下文为 `L` 个 token，在请求开始时直接为 `L` 个位置分配物理显存，而实际只处理了 `L′` 个位置，那么未用的 `L−L′` 个位置会在请求存活期间占住显存。PDF 批注特别关注“每轮只增长一个 token”的影响：增长缓慢意味着预先分配的空间可能在请求的大部分生命周期中保持空置，从而压低同一时刻可容纳的请求数。[论文，§1–2](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=2)
+推理请求先经历**预填充**（prefill）：并行处理输入提示，建立各位置的 KV；随后进入**解码**（decode）：每轮使用已有 KV 生成下一个 token，并将新 token 的 KV 追加到缓存。若一个请求需要容纳的最大上下文为 $L$ 个 token，在请求开始时直接为 $L$ 个位置分配物理显存，而实际只处理了 $L'$ 个位置，那么未用的 $L-L'$ 个位置会在请求存活期间占住显存。PDF 批注特别关注“每轮只增长一个 token”的影响：增长缓慢意味着预先分配的空间可能在请求的大部分生命周期中保持空置，从而压低同一时刻可容纳的请求数。[论文，§1–2](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=2)
 
 PagedAttention 通过把 KV 缓存拆为固定 token 数的块、用到时才分配块，减小上述浪费。每个块本身有虚拟地址，但同一请求的相邻块通常不处在连续虚拟地址上；服务框架须保存**块表**，在运行注意力算子时指明逻辑块对应哪个实际块。注意力算子原本按连续地址访问一段 K、V 张量，现在需要读取块表、计算块内偏移，才能访问整段历史 KV。论文将这种框架与算子共同维护的映射称为用户态分页；底层硬件仍负责各虚拟地址到物理页的转换。[论文，§2.2–3、图 1](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=3)
 
@@ -24,15 +24,21 @@ PagedAttention 通过把 KV 缓存拆为固定 token 数的块、用到时才分
 
 系统需要同时满足两个条件：一个请求的 KV 对注意力算子表现为可直接寻址的张量；其**物理显存**又只随实际上下文长度增长。前一个条件决定新注意力算子能否直接接入，后一个条件决定是否会被最大上下文长度产生的预留浪费限制批量。虚拟地址是程序使用的稳定位置，物理页是实际承载数据的显存；二者可以通过映射分开管理。连续的是前者，按需增长的是后者。[论文，§3–5](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=5)
 
-对一张由某个工作进程管理的、单层 K 缓存张量，论文记最大批量为 `B`、最大上下文长度为 `L`、该进程上的 KV 头数为 `H`、头维度为 `D`、每元素字节数为 `P`。每请求的虚拟槽位大小 `S = L × H × D × P`，整张量预留 `B × S` 字节；V 缓存同理。若该进程管理 `N` 层，就有 `2N` 张这样的虚拟张量。这里的 **worker** 是执行模型部分计算的工作进程，参数 `N`、`H` 都按该进程实际负责的层和 KV 头计算；在论文的张量并行例子中，两个 GPU 分担 KV 头，因此每进程的 `H` 减半。[论文，表 2、§5.1](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=6)
+对一张由某个工作进程管理的、单层 K 缓存张量，论文记最大批量为 $B$、最大上下文长度为 $L$、该进程上的 KV 头数为 $H$、头维度为 $D$、每元素字节数为 $P$。单请求的虚拟槽位大小和整张量预留字节数分别为：
 
-论文的 Yi-34B、两路张量并行、FP16 例子取 `N=60`、`H=4`、`D=128`、`P=2` 字节、`L=200K`、`B=500`。每请求每层的 K 张量槽位约 200 MB，每张 K 或 V 张量约 100 GB；每个 worker 为 60 层的 K/V 共预留约 12 TB **虚拟地址空间**。这不是启动时占用 12 TB 物理显存，而是给各请求确定可增长的地址范围；页映射才决定实际显存占用。[论文，§5.1、图 5](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=6)
+$$
+S=L\times H\times D\times P,\qquad \text{预留字节数}=B\times S \tag{1}
+$$
+
+V 缓存同理。若该进程管理 $N$ 层，就有 $2N$ 张这样的虚拟张量。这里的 **worker** 是执行模型部分计算的工作进程，参数 $N$、$H$ 都按该进程实际负责的层和 KV 头计算；在论文的张量并行例子中，两个 GPU 分担 KV 头，因此每进程的 $H$ 减半。[论文，表 2、§5.1](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=6)
+
+论文的 Yi-34B、两路张量并行、FP16 例子取 $N=60$、$H=4$、$D=128$、$P=2$ 字节、$L=200K$、$B=500$。每请求每层的 K 张量槽位约 200 MB，每张 K 或 V 张量约 100 GB；每个 worker 为 60 层的 K/V 共预留约 12 TB **虚拟地址空间**。这不是启动时占用 12 TB 物理显存，而是给各请求确定可增长的地址范围；页映射才决定实际显存占用。[论文，§5.1、图 5](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=6)
 
 ## 方法原理
 
 ### 虚拟张量与物理页映射
 
-初始化时，vAttention 在工作进程中为各层 K、V 创建虚拟张量，给每个请求分配整数 `reqId ∈ [0, B−1]`。请求 `reqId` 的单层 K 或 V 槽位起点是 `reqId × S`。vAttention 用 CUDA 虚拟内存管理（Virtual Memory Management，VMM）接口，或论文扩展的 NVIDIA 驱动接口，给槽位中已使用的前缀映射物理页；尚未使用的后缀只保留地址。普通激活等其他张量仍由原有分配器处理。[论文，§5.1–5.2、图 6](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=7)
+初始化时，vAttention 在工作进程中为各层 K、V 创建虚拟张量，给每个请求分配整数 $\mathrm{reqId}\in[0,B-1]$。请求 `reqId` 的单层 K 或 V 槽位起点是 $\mathrm{reqId}\times S$。vAttention 用 CUDA 虚拟内存管理（Virtual Memory Management，VMM）接口，或论文扩展的 NVIDIA 驱动接口，给槽位中已使用的前缀映射物理页；尚未使用的后缀只保留地址。普通激活等其他张量仍由原有分配器处理。[论文，§5.1–5.2、图 6](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=7)
 
 ![原文图 5：请求 R1、R2、R3 的虚拟槽位和物理页随时间变化](images/图5-虚拟张量与物理页按需映射.png)
 
@@ -40,7 +46,7 @@ PagedAttention 通过把 KV 缓存拆为固定 token 数的块、用到时才分
 
 图 2 的浅色长框是 R1、R2 的虚拟槽位，深色部分表示已经映射物理页。(a) 只预留地址；(b) 给 R1 映射一页；(c) R1 增长到两页，R2 映射一页；(d) R1 结束后，其槽位暂时保留原映射；(e) 新请求 R3 接过 R1 的槽位和已映射页。图下方分散的物理页说明地址连续与物理相邻是两件事。R3 使用该槽位时，其新 KV 会写入相应位置；延迟回收节省的是重新申请和映射页的操作。[论文，图 5、§6.1.2](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=8)
 
-用一个**解释性构造**核对地址计算：设 `B=3`、每个槽位容纳 8 个 token，示意性的页组容纳 2 个 token。`reqId=0、1、2` 分别固定占用虚拟 token 区间 `[0,8)、[8,16)、[16,24)`。若活跃请求 0、2 的实际长度分别为 3、5，系统需要为它们的前缀各映射 2、3 个页组；中间槽位 1 可以空着，而请求 2 在虚拟地址中的起点仍是 16。这里“每页组 2 个 token”仅用于说明映射关系，不代表论文中的 CUDA 页大小；真实每页组容纳多少 token 取决于模型形状与页组字节数。[论文，§5.1、表 8](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=13)
+用一个**解释性构造**核对地址计算：设 $B=3$、每个槽位容纳 8 个 token，示意性的页组容纳 2 个 token。$\mathrm{reqId}=0,1,2$ 分别固定占用虚拟 token 区间 $[0,8),[8,16),[16,24)$。若活跃请求 0、2 的实际长度分别为 3、5，系统需要为它们的前缀各映射 2、3 个页组；中间槽位 1 可以空着，而请求 2 在虚拟地址中的起点仍是 16。这里“每页组 2 个 token”仅用于说明映射关系，不代表论文中的 CUDA 页大小；真实每页组容纳多少 token 取决于模型形状与页组字节数。[论文，§5.1、表 8](https://apanwariisc.github.io/publications/asplos-2025-vattention/vattention-asplos25.pdf#page=13)
 
 ### 请求调度与连续批处理
 

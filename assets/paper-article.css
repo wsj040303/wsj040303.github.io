@@ -26,7 +26,21 @@
 }
 .paper-article .paper-figure figcaption a { color: #236c40; text-decoration: underline; text-underline-offset: 3px; }
 .paper-article .paper-figure figcaption a:hover { color: #144f30; }
-.paper-article .formula { max-width: 100%; }
+.paper-article .math-inline { color: #255d3c; font-size: 1.06em; white-space: nowrap; }
+.paper-article .math-display {
+  max-width: 100%;
+  margin: 21px 0 24px;
+  padding: 18px 22px;
+  overflow-x: auto;
+  border: 1px solid #bfd6b4;
+  border-radius: 11px;
+  background: #f3f8ee;
+  color: #204d34;
+  font-size: clamp(16px, 1.3vw, 19px);
+  line-height: 1.55;
+}
+.paper-article .math-display .katex-display { margin: 0; }
+.paper-article .math-display .katex-display > .katex { white-space: nowrap; }
 .paper-article strong { color: #1d5937; }
 
 @media (max-width: 650px) {
@@ -39,4 +53,5 @@
     color: #647c68;
     font-size: 11px;
   }
+  .paper-article .math-display { padding: 15px 18px; font-size: 16px; }
 }

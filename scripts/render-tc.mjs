@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { marked } from "marked";
+import { marked } from "./math-markdown.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const articleDir = path.join(repo, "papers", "tensor-comprehensions");
@@ -85,14 +85,6 @@ function renderMarkdown(input, subheadings = []) {
   if (subindex !== subheadings.length) {
     throw new Error("Missing rendered level-three heading in article");
   }
-  html = html.replace(
-    /<pre><code class="language-formula">([\s\S]*?)<\/code><\/pre>/g,
-    (_, content) => {
-      const value = content.trimEnd();
-      return '<div class="formula" role="math" aria-label="' +
-        value.replaceAll("\n", "；") + '">' + value + "</div>";
-    }
-  );
   html = html.replace(
     /<pre><code(?: class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g,
     (_, content) => '<figure class="code-block"><pre><code>' + content + "</code></pre></figure>"

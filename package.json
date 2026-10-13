@@ -18,6 +18,7 @@
     "check:awq": "node scripts/render-awq.mjs --check"
   },
   "devDependencies": {
+    "katex": "^0.16.47",
     "marked": "16.4.2"
   }
 }

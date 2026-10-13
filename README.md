@@ -1,6 +1,10 @@
 # wsj040303.github.io
 my notes-especially for ai-infra
 
+## 论文公式
+
+论文报告的数学符号和行内表达式写作 `$...$`，需要独立展示的公式写作 `$$` 块；重要公式可在 TeX 末尾加 `\tag{1}` 等编号。反引号仅用于代码、命令和配置名。构建脚本使用 KaTeX 将数学 Markdown 预渲染成 HTML，网页使用 `assets/math/` 中的本地样式与字体。修改任一 `papers/*/article.md` 后，运行对应的 `npm run build:*` 和 `npm run check:*`。
+
 ## 编辑 Tensor Comprehensions 阅读报告
 
 正文源文件是 [papers/tensor-comprehensions/article.md](papers/tensor-comprehensions/article.md)，图片放在同目录的 images/。修改 Markdown 后，通知 Codex 检查并发布；博客页面 index.html 会由 Markdown 生成。

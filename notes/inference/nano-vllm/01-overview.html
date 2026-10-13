@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Nano-vLLM 项目概览、组件思维导图与源码阅读顺序。">
+    <meta name="theme-color" content="#0b2015">
+    <title>Nano-vLLM 项目概览与源码阅读路径 · WSJ</title>
+    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../../assets/garden.css">
+    <link rel="stylesheet" href="../../../assets/inference.css">
+    <script src="../../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../../index.html">首页</a><a href="../../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../../papers/index.html">论文阅读</a><a href="../../../projects/index.html">GitHub 项目</a><a href="../../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../../index.html">首页</a><span>/</span><a href="../../../ai-infra/index.html">AI Infra</a><span>/</span><a href="../index.html">推理引擎编写</a><span>/</span><a href="index.html">Nano-vLLM 解读</a><span>/</span>Nano-vLLM 项目概览与源码阅读路径</nav>
+        <div class="reader-heading"><h1>Nano-vLLM 项目概览与源码阅读路径</h1><p class="article-deck">第 1 章 · 项目范围、请求路径与阅读顺序</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">项目定位与阅读范围</a></li>
+<li><a href="#section-2">组件思维导图</a></li>
+<li><a href="#section-3">关键状态与模块边界</a></li>
+<li><a href="#section-4">源码阅读顺序</a></li>
+<li><a href="#section-5">本系列的验证边界</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<p>Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/tree/bb823b3e06983d71485a8e1f23715ebd87d98ef8" target="_blank" rel="noopener noreferrer">Nano-vLLM 提交 <code>bb823b3</code></a> 为阅读基准，沿着一次请求的运行路径理解请求状态、调度、KV Cache 和模型执行。第一章建立组件关系；第二章从 <code>LLMEngine</code> 开始追踪代码。</p>
+<section id="section-1"><h3>项目定位与阅读范围</h3>
+<p>语言模型给定 token 序列，计算下一个 token 的得分；<strong>推理引擎</strong>还要管理多个请求：何时把请求送进模型、哪些请求共用一次计算、已计算的注意力状态保存在哪里，以及请求结束后怎样释放资源。Nano-vLLM 在一个较小的代码库里展示这些职责，并使用 Qwen3 模型、前缀缓存、张量并行和 CUDA Graph 等实现。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/README.md" target="_blank" rel="noopener noreferrer">项目 README</a></p>
+<p>当前对外的 <code>LLM.generate()</code> 是<strong>离线批量接口</strong>：它先将本次调用传入的所有 prompt 加入等待队列，再循环执行，最后一次性返回结果。它适合学习批处理和吞吐；若要研究错峰到达请求的首 token 延迟，还需要另写到达时间回放和逐请求事件记录。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer"><code>LLMEngine.generate()</code> 源码</a></p>
+</section>
+<section id="section-2"><h3>组件思维导图</h3>
+<figure class="engine-figure"><a href="images/architecture-map.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/architecture-map.svg" alt="Nano-vLLM 一次请求的组件关系：分词与请求状态进入调度器，调度器管理 KV 块并调用模型执行器，采样结果回到请求状态，未结束时继续下一轮。"></a><figcaption>Nano-vLLM 一次请求的组件关系：分词与请求状态进入调度器，调度器管理 KV 块并调用模型执行器，采样结果回到请求状态，未结束时继续下一轮。 点击可打开完整图片。</figcaption></figure>
+<p>图是依据本系列所读版本绘制的结构示意。横向箭头表示一次计算的主要数据流；下方分支标出调度器使用的 KV 块管理，以及模型执行器使用的 Qwen3、Attention 和 GPU KV 张量。生成一个 token 后，请求若尚未结束，会回到下一轮调度，而不是重新创建模型。</p>
+<p>这条路径可按一次请求展开：</p>
+<ol>
+<li><code>LLMEngine.add_request()</code> 将文本分词，创建 <code>Sequence</code>，放进调度器的 <code>waiting</code> 队列。调用者若已经提供 token ID 列表，就跳过分词。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer">入口源码</a></li>
+<li><code>Scheduler.schedule()</code> 选择本轮要运行的请求，决定是处理 prompt 的 <strong>prefill</strong>，还是让运行中请求继续生成的 <strong>decode</strong>。它通过 <code>BlockManager</code> 查询、分配和释放 KV 块。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer">调度器源码</a></li>
+<li><code>ModelRunner.run()</code> 按本轮阶段准备 token、位置和 KV 映射，调用 Qwen3 前向计算并采样一个 token。<strong>KV Cache</strong> 保存注意力层已经算出的 Key 和 Value，后续 decode 能读取历史状态。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer">执行器源码</a></li>
+<li><code>Scheduler.postprocess()</code> 把采样结果追加到请求，检查结束条件；完成的请求解除对 KV 块的引用，未完成的请求继续参加后续轮次。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer">后处理源码</a></li>
+</ol>
+</section>
+<section id="section-3"><h3>关键状态与模块边界</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>对象</th>
+<th>保存或处理的内容</th>
+<th>阅读时关注的接口</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>LLMEngine</code></td>
+<td>分词器、执行器和调度器；驱动生成循环</td>
+<td><code>add_request()</code>、<code>step()</code>、<code>generate()</code></td>
+</tr>
+<tr>
+<td><code>Sequence</code></td>
+<td>一个请求的 prompt、生成 token、状态和块表</td>
+<td><code>num_tokens</code>、<code>num_cached_tokens</code>、<code>append_token()</code></td>
+</tr>
+<tr>
+<td><code>Scheduler</code></td>
+<td>等待与运行队列；决定本轮 batch</td>
+<td><code>schedule()</code>、<code>postprocess()</code></td>
+</tr>
+<tr>
+<td><code>BlockManager</code></td>
+<td>物理 KV 块编号、前缀哈希和引用计数</td>
+<td><code>can_allocate()</code>、<code>allocate()</code>、<code>deallocate()</code></td>
+</tr>
+<tr>
+<td><code>ModelRunner</code></td>
+<td>模型权重、GPU KV 张量、本轮输入整理与采样</td>
+<td><code>prepare_prefill()</code>、<code>prepare_decode()</code>、<code>run()</code></td>
+</tr>
+</tbody></table></div>
+<p><code>Sequence</code> 的三个计数需要分开：<code>num_tokens</code> 是当前序列中的 token 总数；<code>num_cached_tokens</code> 是已经完成模型计算、其 KV 可供后续使用的 token 数；<code>num_scheduled_tokens</code> 是本轮计划计算的 token 数。举例说，prompt <code>[A,B,C]</code> 完成 prefill 并采样出 <code>D</code> 后，序列已有 4 个 token，但只有前 3 个完成了 KV 计算；下一轮 decode 才把 <code>D</code> 当作模型输入。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer"><code>Sequence</code> 源码</a></p>
+</section>
+<section id="section-4"><h3>源码阅读顺序</h3>
+<p>阅读顺序按对象依赖安排，而非按目录字母顺序。每一步都能回答一个具体问题，再进入下一步。</p>
+<ol>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py" target="_blank" rel="noopener noreferrer"><code>example.py</code></a> 和 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer"><code>llm_engine.py</code></a>：找到对外入口、请求何时入队，以及一次 <code>step()</code> 的调用顺序。下一章详细解释这一段。</li>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer"><code>sequence.py</code></a>：确认请求状态怎样随 prefill、decode 和完成而变化。</li>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>scheduler.py</code></a> 与 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>block_manager.py</code></a>：解释本轮选择和 KV 资源约束。以调度优化为目标时，这是最先需要读透的两份文件。</li>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>model_runner.py</code></a>：追踪选中的请求怎样变成 GPU 输入，以及块编号怎样变成 Attention 可读的映射。</li>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/utils/context.py" target="_blank" rel="noopener noreferrer"><code>context.py</code></a>、<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py" target="_blank" rel="noopener noreferrer"><code>attention.py</code></a> 和 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py" target="_blank" rel="noopener noreferrer"><code>qwen3.py</code></a>：理解本轮元数据、KV 写入和模型前向。初读时先看输入输出，随后再追具体算子。</li>
+<li><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/bench.py" target="_blank" rel="noopener noreferrer"><code>bench.py</code></a>：核对现有基准的请求分布和计时范围，再设计自己需要的在线负载。</li>
+</ol>
+</section>
+<section id="section-5"><h3>本系列的验证边界</h3>
+<p>本文解释的是指定提交中的代码路径。图中的模块关系和上面的 <code>[A,B,C] → D</code> 算例用于理解实现，并非性能实测结果。完成第二章后，可以用两个短请求手工记录每轮的 <code>waiting</code>、<code>running</code>、<code>num_cached_tokens</code> 和 <code>is_prefill</code>；这些状态比只看最终生成文本更能检验自己是否理解了引擎。</p>
+</section>
+            <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
+<a href="02-llm-engine.html">下一章：LLMEngine</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -3,11 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="WSJ 的 AI Infra 笔记专栏，包含 CUDA、Triton 与 CUTLASS。">
+    <meta name="description" content="WSJ 的 AI Infra 笔记专栏，包含 CUDA、Triton、CUTLASS 与推理引擎编写。">
     <meta name="theme-color" content="#0b2015">
     <title>AI Infra · WSJ</title>
     <link rel="stylesheet" href="../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../assets/garden.css">
+    <link rel="stylesheet" href="../assets/inference.css">
     <script src="../assets/site.js" defer></script>
   </head>
   <body>
@@ -32,7 +33,7 @@
           <h1>AI Infra</h1>
         </div>
         <section class="catalog-box" aria-label="AI Infra 专题目录">
-          <div class="topic-list">
+          <div class="topic-list inference-topics">
             <a class="topic-card" href="../notes/cuda/index.html">
               <h2>CUDA</h2>
               <p>从执行模型、线程与内存入门，到基础算子的代码精读和性能优化。</p>
@@ -44,6 +45,10 @@
             <a class="topic-card" href="../notes/cutlass/index.html">
               <h2>CUTLASS</h2>
               <p>从 GEMM 分块、CuTe 布局与数据流认识 NVIDIA 的高性能算子工具箱。</p>
+            </a>
+            <a class="topic-card" href="../notes/inference/index.html">
+              <h2>推理引擎编写</h2>
+              <p>从 Nano-vLLM 的请求入口、调度与 KV Cache 开始，沿源码理解一次生成怎样完成。</p>
             </a>
           </div>
         </section>

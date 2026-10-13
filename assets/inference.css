@@ -1,0 +1,54 @@
+/* AI Infra catalog: four topics on wide screens, then two and one. */
+.topic-list.inference-topics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.topic-list.inference-topics .topic-card { min-height: 190px; }
+.topic-list.inference-single { grid-template-columns: minmax(0, 1fr); }
+.topic-list.inference-single .topic-card { max-width: 750px; }
+
+/* Third-level chapter directory follows the CUDA operator list layout. */
+.chapter-directory-box { padding: 26px 42px; }
+.chapter-directory { margin: 0; padding: 0; list-style: none; }
+.chapter-directory li + li { border-top: 1px solid #d6e2ce; }
+.chapter-directory a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  min-height: 76px;
+  padding: 20px 16px;
+  color: var(--forest);
+  font-size: clamp(18px, 1.6vw, 24px);
+  font-weight: 720;
+  line-height: 1.5;
+  transition: color .2s ease, background .2s ease;
+}
+.chapter-directory a::after { content: "↗"; flex: 0 0 auto; color: #397a50; font-size: 19px; font-weight: 400; }
+.chapter-directory a:hover { color: #236c40; background: #eff5e8; }
+.chapter-directory .chapter-number { margin-right: 14px; color: #5d9562; font-size: .74em; letter-spacing: .09em; }
+
+/* Markdown-generated inference articles. */
+.reader-heading .article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
+.engine-article .article-intro { margin-bottom: 16px; }
+.engine-article .engine-figure { margin: 24px 0 28px; overflow-x: auto; border: 1px solid #cbdcc4; border-radius: 14px; background: #fffdf7; }
+.engine-article .engine-figure a { display: block; min-width: 850px; }
+.engine-article .engine-figure img { display: block; width: 100%; height: auto; }
+.engine-article .engine-figure figcaption { padding: 12px 16px 14px; border-top: 1px solid #d8e5cf; color: #4a6553; font-size: 12px; line-height: 1.7; }
+.engine-article section h3 { padding-left: 14px; border-left: 5px solid #83b763; }
+.engine-article section h4 { padding-left: 0; border-left: 0; }
+.engine-article strong { color: #1d5937; }
+.engine-article .engine-code { margin: 18px 0; border: 1px solid #557861; border-radius: 12px; overflow: hidden; background: #10251b; }
+.engine-article .engine-code figcaption { display: flex; justify-content: space-between; gap: 14px; padding: 9px 14px; border-bottom: 1px solid #46634d; background: #224733; color: #f2f3df; font-size: 11px; letter-spacing: .04em; }
+.engine-article .engine-code figcaption span { color: #c8e3b9; }
+.engine-article .engine-code pre { margin: 0; padding: 15px 16px; overflow-x: auto; background: #10251b; }
+.engine-article .engine-code code { padding: 0; border: 0; background: transparent; color: #e7efe2; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12.5px; line-height: 1.72; white-space: pre; word-break: normal; }
+.engine-article .reader-actions { margin-top: 42px; }
+.engine-article .source-note { margin-top: 18px; font-size: 12px; color: #58755d; }
+
+@media (max-width: 1250px) {
+  .topic-list.inference-topics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .topic-list.inference-topics { grid-template-columns: minmax(0, 1fr); }
+  .chapter-directory-box { padding: 12px 18px; }
+  .chapter-directory a { min-height: 70px; padding: 16px 7px; font-size: 18px; }
+  .engine-article .engine-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
+}

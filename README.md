@@ -12,3 +12,7 @@ my notes-especially for ai-infra
 正文源文件是 [notes/cuda/performance.md](notes/cuda/performance.md)。直接修改段落、表格和代码块；标有 `<!-- CUDA_SOURCE -->` 的完整 CUDA 代码块也会生成下载用的 `notes/examples/cuda_perf_bench.cu`，因此只需改 Markdown 一份。
 
 修改后通知 Codex 检查并上线。若要自己预览生成结果，在仓库根目录执行 `npm ci`、`npm run build:cuda`，再打开 `notes/cuda/performance.html`；执行 `npm run check:cuda` 可检查 HTML 和 `.cu` 是否与 Markdown 一致。只修改 Markdown 不会更新已发布页面。
+
+## 编辑推理引擎编写专题
+
+Nano-vLLM 解读的两篇正文源文件是 [第 1 章](notes/inference/nano-vllm/01-overview.md) 和 [第 2 章](notes/inference/nano-vllm/02-llm-engine.md)，组件示意图放在同目录的 `images/`。编辑 Markdown 后，运行 `npm run build:inference` 生成对应 HTML；运行 `npm run check:inference` 检查生成页是否与 Markdown 一致。专题入口位于 `ai-infra/index.html → notes/inference/index.html → notes/inference/nano-vllm/index.html`。

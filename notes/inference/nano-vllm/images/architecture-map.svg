@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">Nano-vLLM 请求与组件关系</title>
+  <desc id="desc">请求经分词创建 Sequence，Scheduler 选择 prefill 或 decode 并管理 KV 块，ModelRunner 调用 Qwen3 和 Attention，采样结果由 postprocess 更新；未结束的请求返回下一轮调度。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3b7651" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .box-title { font-size: 22px; font-weight: 720; }
+      .body { font-size: 16px; fill: #3e5b46; }
+      .label { font-size: 15px; font-weight: 600; fill: #39714d; }
+      .path { fill: none; stroke: #3b7651; stroke-width: 3; marker-end: url(#arrow); }
+      .support { fill: none; stroke: #83ad7a; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="624" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="48" y="60" class="title">Nano-vLLM 请求与组件关系</text>
+  <text x="49" y="89" class="subtitle">LLMEngine 串联 add_request、step 与 generate；下面是一轮计算的主要控制和数据路径。</text>
+
+  <rect x="48" y="130" width="244" height="128" rx="16" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="68" y="169" class="box-title">请求入口</text>
+  <text x="68" y="201" class="body">文本或 Token IDs</text>
+  <text x="68" y="227" class="body">Tokenizer → Sequence</text>
+
+  <rect x="346" y="130" width="244" height="128" rx="16" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="366" y="169" class="box-title">Scheduler</text>
+  <text x="366" y="201" class="body">waiting / running</text>
+  <text x="366" y="227" class="body">选择 prefill 或 decode</text>
+
+  <rect x="644" y="130" width="244" height="128" rx="16" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="664" y="169" class="box-title">ModelRunner</text>
+  <text x="664" y="201" class="body">整理输入与位置</text>
+  <text x="664" y="227" class="body">执行模型并采样</text>
+
+  <rect x="942" y="130" width="210" height="128" rx="16" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="962" y="169" class="box-title">postprocess</text>
+  <text x="962" y="201" class="body">更新请求状态</text>
+  <text x="962" y="227" class="body">完成时释放引用</text>
+
+  <path class="path" d="M294 194 H338"/>
+  <text x="303" y="181" class="label">入队</text>
+  <path class="path" d="M592 194 H636"/>
+  <text x="597" y="181" class="label">本轮 batch</text>
+  <path class="path" d="M890 194 H934"/>
+  <text x="896" y="181" class="label">token</text>
+
+  <rect x="48" y="336" width="244" height="126" rx="16" fill="#f4f8ee" stroke="#ccddc6" stroke-width="2"/>
+  <text x="68" y="375" class="box-title">Sequence 状态</text>
+  <text x="68" y="407" class="body">prompt 与已生成 token</text>
+  <text x="68" y="433" class="body">已缓存 / 本轮计划数</text>
+
+  <rect x="346" y="336" width="244" height="126" rx="16" fill="#f9f3e4" stroke="#e2d7bb" stroke-width="2"/>
+  <text x="366" y="375" class="box-title">BlockManager</text>
+  <text x="366" y="407" class="body">KV 块表与前缀复用</text>
+  <text x="366" y="433" class="body">分配、引用计数、释放</text>
+
+  <rect x="644" y="336" width="244" height="126" rx="16" fill="#f4f8ee" stroke="#ccddc6" stroke-width="2"/>
+  <text x="664" y="375" class="box-title">Qwen3 / Attention</text>
+  <text x="664" y="407" class="body">读取历史 KV</text>
+  <text x="664" y="433" class="body">写入当前 token 的 KV</text>
+
+  <rect x="942" y="336" width="210" height="126" rx="16" fill="#f9f3e4" stroke="#e2d7bb" stroke-width="2"/>
+  <text x="962" y="375" class="box-title">输出或继续</text>
+  <text x="962" y="407" class="body">EOS / 长度检查</text>
+  <text x="962" y="433" class="body">未结束则再调度</text>
+
+  <path class="support" d="M170 260 V328"/>
+  <path class="support" d="M468 260 V328"/>
+  <path class="support" d="M766 260 V328"/>
+  <path class="support" d="M1047 260 V328"/>
+
+  <path class="path" d="M1047 465 V545 H318 V220 H338"/>
+  <text x="629" y="520" class="label">未完成的请求 → 下一轮 schedule</text>
+  <text x="48" y="593" class="subtitle">依据 bb823b3 版本源码绘制。实线表示主要调用顺序；下方分支表示各阶段使用或更新的状态。</text>
+</svg>

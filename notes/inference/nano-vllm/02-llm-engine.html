@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Nano-vLLM 的 LLMEngine：初始化、请求入队、单轮执行与批量生成。">
+    <meta name="theme-color" content="#0b2015">
+    <title>LLMEngine：请求入口与执行循环 · WSJ</title>
+    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../../assets/garden.css">
+    <link rel="stylesheet" href="../../../assets/inference.css">
+    <script src="../../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../../index.html">首页</a><a href="../../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../../papers/index.html">论文阅读</a><a href="../../../projects/index.html">GitHub 项目</a><a href="../../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../../index.html">首页</a><span>/</span><a href="../../../ai-infra/index.html">AI Infra</a><span>/</span><a href="../index.html">推理引擎编写</a><span>/</span><a href="index.html">Nano-vLLM 解读</a><span>/</span>LLMEngine：请求入口与执行循环</nav>
+        <div class="reader-heading"><h1>LLMEngine：请求入口与执行循环</h1><p class="article-deck">第 2 章 · 请求入口与执行循环</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">类的职责与初始化顺序</a></li>
+<li><a href="#section-2">多卡进程与 rank</a></li>
+<li><a href="#section-3">请求创建与入队</a></li>
+<li><a href="#section-4">单轮调度与模型执行</a></li>
+<li><a href="#section-5">生成循环与结果顺序</a></li>
+<li><a href="#section-6">两个请求的执行示例</a></li>
+<li><a href="#section-7">阅读结论与下一步</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<p><code>LLMEngine</code> 是 Nano-vLLM 的控制入口：它创建模型执行器和调度器，接收请求，再反复执行“调度 → 模型计算 → 状态更新”。本文以 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer">Nano-vLLM 提交 <code>bb823b3</code> 的 <code>llm_engine.py</code></a> 为准，解释单卡主路径和多卡分支。手敲练习稿可以按同一控制流逐段核对；运行结果与性能数据不从尚未验证的练习稿推断。</p>
+<section id="section-1"><h3>类的职责与初始化顺序</h3>
+<p>对外导出的 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/llm.py" target="_blank" rel="noopener noreferrer"><code>LLM</code></a> 只继承 <code>LLMEngine</code>，没有重写方法。调用 <code>LLM(model_path, ...)</code> 就会进入 <code>LLMEngine.__init__()</code>。其中 <code>model_path</code> 指向包含模型配置、权重和分词器文件的目录；它既用于加载 Qwen3 权重，也用于加载匹配的 tokenizer。</p>
+<p>初始化的顺序决定了后续组件能否取得完整配置：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>代码动作</th>
+<th>后续依赖</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>从 <code>kwargs</code> 中筛出 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/config.py" target="_blank" rel="noopener noreferrer"><code>Config</code></a> 的字段并建立配置</td>
+<td>模型目录、最大批量 token 数、并行度等参数固定下来</td>
+</tr>
+<tr>
+<td>2</td>
+<td>创建 <code>ModelRunner</code>，加载权重、预热并分配 GPU KV 张量</td>
+<td>执行器算出 <code>config.num_kvcache_blocks</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>从 <code>config.model</code> 加载 <code>AutoTokenizer</code>，读取 <code>eos_token_id</code></td>
+<td>调度器知道何时因 EOS 结束请求</td>
+</tr>
+<tr>
+<td>4</td>
+<td>创建 <code>Scheduler(config)</code></td>
+<td>块管理器取得真实块数和 EOS</td>
+</tr>
+</tbody></table></div>
+<p>这里的“同一模型目录”强调<strong>权重与分词器配套</strong>。分词器把文本转换为 token ID，模型的嵌入层按这些 ID 读取权重；如果二者不匹配，同一个 ID 的语义会错位。<code>use_fast=True</code> 请求 Transformers 使用快速分词器实现，但不改变两者必须配套的关系。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner</code> 权重加载</a></p>
+</section>
+<section id="section-2"><h3>多卡进程与 rank</h3>
+<p><strong>rank</strong> 是并行进程的编号，从 0 到 <code>tensor_parallel_size - 1</code>。这个项目让每个 rank 对应一张 GPU，共同计算同一批请求的模型分片；它不是把不同请求简单分派给不同 GPU。rank 0 在当前进程运行，其他 rank 通过子进程启动。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner</code> 的设备与进程组初始化</a></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>ctx = mp.get_context(&quot;spawn&quot;)
+for i in range(1, config.tensor_parallel_size):
+    event = ctx.Event()
+    process = ctx.Process(target=ModelRunner, args=(config, i, event))
+    process.start()
+    self.ps.append(process)
+    self.events.append(event)
+self.model_runner = ModelRunner(config, 0, self.events)</code></pre></figure>
+<p><code>get_context(&quot;spawn&quot;)</code> 取得用于创建子进程和同步对象的上下文；这一行本身没有启动进程。<code>process.start()</code> 才让编号为 <code>i</code> 的 worker 开始运行。循环从 1 开始，是因为循环后的 <code>ModelRunner(config, 0, ...)</code> 已在当前进程创建 rank 0。单卡配置下 <code>range(1, 1)</code> 为空，不产生额外 worker。</p>
+<p>每个子进程的 <code>Event</code> 用来通知它处理新命令，<code>self.ps</code> 保存进程对象，退出时可以逐个 <code>join()</code> 等待它们结束。rank 0 在当前进程中可以直接调用自己的 <code>ModelRunner</code>，但它仍参加同一组模型计算。控制消息由共享内存和事件传递；张量并行计算所需的结果通过分布式通信完成。这两类通信承担不同工作。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner.call()</code> 与共享内存路径</a></p>
+</section>
+<section id="section-3"><h3>请求创建与入队</h3>
+<p><code>add_request(prompt, sampling_params)</code> 只负责<strong>提交</strong>一个请求：字符串 prompt 经 tokenizer 转成 token ID；已经传入的 token ID 列表直接使用；接着构造 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer"><code>Sequence</code></a>，调用 <code>scheduler.add(seq)</code> 将它加入 <code>waiting</code> 队列。此方法没有立即运行模型，也没有返回新建 <code>Sequence</code> 的 ID。</p>
+<p><code>generate()</code> 允许输入一个 <code>SamplingParams</code> 对象或与 prompts 对应的参数列表。若只传一个对象，代码先把它重复成与 prompts 等长的列表。随后使用 <code>zip(prompts, sampling_params)</code> <strong>按位置配对</strong>：第一个 prompt 配第一组参数，第二个配第二组。每一对交给 <code>add_request()</code>。若调用者直接给长度不等的两个列表，Python 的 <code>zip</code> 在较短列表结束时停止；当前实现没有额外检查，因此剩余 prompt 不会入队。</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>for prompt, sp in zip(prompts, sampling_params):
+    self.add_request(prompt, sp)</code></pre></figure>
+<p>这段 <code>for</code> 在生成循环开始前完成，所以 <code>generate()</code> 的这一批请求都先到达等待队列。它能展示批量调度，但不能直接代表线上请求按不同时间到达的情况。</p>
+</section>
+<section id="section-4"><h3>单轮调度与模型执行</h3>
+<p><code>step()</code> 表示一次调度与模型计算。<code>schedule()</code> 返回两个值：<code>seqs</code> 是本轮选中的 <code>Sequence</code> 对象列表，<code>is_prefill</code> 表示本轮处理 prompt 还是执行 decode。当前调度器会先尝试 prefill；若选中 prefill，本轮不会混入 decode。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>Scheduler.schedule()</code> 源码</a></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>seqs, is_prefill = self.scheduler.schedule()
+num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+token_ids = self.model_runner.call(&quot;run&quot;, seqs, is_prefill)
+self.scheduler.postprocess(seqs, token_ids, is_prefill)
+outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]</code></pre></figure>
+<p><code>ModelRunner.run()</code> 按阶段准备输入、执行 Qwen3 前向并采样 token；<code>postprocess()</code> 把本轮已计算的 token 计入缓存进度，必要时追加采样 token，并在结束时释放该请求的 KV 块。<code>step()</code> 只把<strong>本轮已完成的请求</strong>放进 <code>outputs</code>。运行中的请求即使刚生成首 token，也暂时不在返回列表中。</p>
+<p>这里的 <code>num_tokens</code> 用<strong>正负号作阶段标记</strong>：prefill 返回本轮计划计算的 prompt token 总数；decode 每个选中请求计算一个 token，于是返回 <code>-len(seqs)</code>。负号不代表“负数个 token”，它让后面的进度条能按符号区分 prefill 和 decode，分别计算显示速度。要记录实际每个请求的首 token 时间，需要在现有返回值之外增加逐请求事件。</p>
+</section>
+<section id="section-5"><h3>生成循环与结果顺序</h3>
+<p><code>generate()</code> 反复调用 <code>step()</code>，直到调度器的等待队列和运行队列都为空。每轮用 <code>perf_counter()</code> 量 <code>step()</code> 的耗时，再根据上述符号更新最近一轮的 prefill 或 decode 吞吐显示。这里显示的是<strong>当前轮次的处理速度</strong>，并非每个请求的首 token 延迟或尾延迟。</p>
+<p>完成的请求以 <code>seq_id</code> 为键放进结果字典。最后代码按 <code>seq_id</code> 排序，再把生成 token ID 解码成文本，所以返回顺序与请求加入顺序一致。实际返回的每项是 <code>{&quot;text&quot;: ..., &quot;token_ids&quot;: ...}</code> 字典；当前源码把方法返回类型写为 <code>list[str]</code>，与实际返回结构不一致，阅读和手敲时应以第 89–90 行的返回语句为准。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer">返回路径源码</a></p>
+</section>
+<section id="section-6"><h3>两个请求的执行示例</h3>
+<p>设请求 A 与 B 都在 <code>generate()</code> 开始时加入，均配置 <code>max_tokens=2</code>、<code>ignore_eos=True</code>，且 token 预算与 KV 块足以让二者同处一次 prefill batch。下面是按当前代码推导的控制流；采样出的具体 token 受随机过程影响。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>时刻</th>
+<th>等待与运行状态</th>
+<th>计算与返回</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>入队完成</td>
+<td>A、B 都在 <code>waiting</code></td>
+<td>尚未执行模型</td>
+</tr>
+<tr>
+<td>第一次 <code>step()</code></td>
+<td>调度器安排两者完整 prefill，移入 <code>running</code></td>
+<td>算 prompt、各采样首 token；尚未满足两个输出 token，因此 <code>step()</code> 不返回完成请求</td>
+</tr>
+<tr>
+<td>第二次 <code>step()</code></td>
+<td>A、B 在 <code>running</code></td>
+<td>各输入上一步采样的 token，执行一次 decode；达到 <code>max_tokens=2</code>，释放其块并返回完成结果</td>
+</tr>
+<tr>
+<td>循环结束</td>
+<td>两个队列都为空</td>
+<td>按 <code>seq_id</code> 排序，解码并返回 A、B 的结果</td>
+</tr>
+</tbody></table></div>
+<p>若 prompt 需要分块 prefill、资源不足或 EOS 提前结束，轮数和队列变化会不同。这个小例子只用于核对 <code>generate → step → schedule → run → postprocess</code> 的基本关系。</p>
+</section>
+<section id="section-7"><h3>阅读结论与下一步</h3>
+<p><code>LLMEngine</code> 自己不实现 Attention 算法或 KV 块分配细节。它的关键职责是<strong>保持顺序与边界</strong>：先完成资源配置，再接收请求；每轮先调度，再执行，再更新状态；所有请求结束后才按提交顺序返回。掌握这条控制流后，阅读 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer"><code>Sequence</code></a> 的计数，再进入 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>Scheduler</code></a> 的 prefill/decode 分支，才能判断调度改动会影响哪些请求。</p>
+</section>
+            <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
+<a href="01-overview.html">上一章：项目概览</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

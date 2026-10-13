@@ -5,7 +5,9 @@
     "build:tc": "node scripts/render-tc.mjs",
     "check:tc": "node scripts/render-tc.mjs --check",
     "build:cuda": "node scripts/render-cuda.mjs",
-    "check:cuda": "node scripts/render-cuda.mjs --check"
+    "check:cuda": "node scripts/render-cuda.mjs --check",
+    "build:inference": "node scripts/render-inference.mjs",
+    "check:inference": "node scripts/render-inference.mjs --check"
   },
   "devDependencies": {
     "marked": "16.4.2"

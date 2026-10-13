@@ -71,7 +71,7 @@ $$
 
 *原文算法 1：黄色标记区域依次给出块大小与初始化、第 5–8 行的双层循环、第 9–10 行的局部分数和统计量、第 11–13 行的状态合并与写回。截取自[Dao 等，2022，原文算法 1](https://arxiv.org/pdf/2205.14135v2#page=5)。*
 
-以下按原文算法 1 的执行顺序展开。用于行统计量的最大值、指数、缩放与除法均按查询行独立计算；例如长度 $B_r$ 的向量从一个 $B_r\times B_c$ 矩阵相减，表示向量的每个分量作用于对应整行。
+以下按原文算法 1 的执行顺序展开。
 
 1. **确定块大小并划分输入（第 1、3–4 行）。** 算法取 $B_c=\lceil M/(4d)\rceil$、$B_r=\min(\lceil M/(4d)\rceil,d)$，从而得到 $T_c=\lceil N/B_c\rceil$ 个键/值块和 $T_r=\lceil N/B_r\rceil$ 个查询块。$Q,O,m,\ell$ 都按查询行划成相同的 $T_r$ 块，$K,V$ 按键的位置划成相同的 $T_c$ 块；不足一个整块的尾部仅处理有效位置。式中的 $4$ 是论文块大小构造采用的常数系数，具体内核仍受片上资源限制。[论文，算法 1 第 1、3–4 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
@@ -83,7 +83,7 @@ $$
 
 5. **计算当前分数块（第 9 行）。** 片上矩阵乘法生成 $S_{ij}=Q_iK_j^{\mathsf T}\in\mathbb{R}^{B_r\times B_c}$。其中第 $a$ 行、第 $b$ 列是查询块中第 $a$ 个查询与键块中第 $b$ 个键的点积；$a$ 和 $b$ 分别是块内查询、键的行号。该分数块随后在片上消费，不写成 HBM 中的完整 $N\times N$ 矩阵。[论文，算法 1 第 9 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
-6. **计算当前块的局部 Softmax 统计量（第 10 行）。** 令 $\operatorname{rowmax}$ 表示按行取最大值，$\operatorname{rowsum}$ 表示按行求和。先算 $\widetilde m_{ij}=\operatorname{rowmax}(S_{ij})$；再逐元素计算相对于这个最大值的指数 $\widetilde P_{ij}=\exp(S_{ij}-\widetilde m_{ij})$；最后求 $\widetilde\ell_{ij}=\operatorname{rowsum}(\widetilde P_{ij})$。减去行最大值使指数自变量不大于零。$\widetilde P_{ij}$ 尚未除以整行所有键的分母，因此不是最终注意力概率。[论文，§3.1、算法 1 第 10 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+6. **计算当前块的局部 Softmax 统计量（第 10 行）。** 令 $\operatorname{rowmax}$ 表示按行取最大值，$\operatorname{rowsum}$ 表示按行求和。先算 $\widetilde m_{ij}=\operatorname{rowmax}(S_{ij})$。原文的 $\widetilde P_{ij}=\exp(S_{ij}-\widetilde m_{ij})$ 是简写：对块内第 $a$ 行、第 $b$ 列，实际计算的是 $\widetilde P_{ij}[a,b]=\exp(S_{ij}[a,b]-\widetilde m_{ij}[a])$。若 $S_{ij}$ 的两行是 $[1,3]$ 和 $[4,0]$，则 $\widetilde m_{ij}=[3,4]$；第一行的两个分数都减 $3$，第二行的两个分数都减 $4$，得到 $[-2,0]$ 和 $[0,-4]$。这样每个指数的自变量都不大于零。最后求 $\widetilde\ell_{ij}=\operatorname{rowsum}(\widetilde P_{ij})$；$\widetilde P_{ij}$ 尚未除以整行所有键的分母，因此不是最终注意力概率。[论文，§3.1、算法 1 第 10 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
 7. **合并最大值与分母（第 11 行）。** 逐行令 $m_i^{\mathrm{new}}=\max(m_i,\widetilde m_{ij})$。旧状态以 $m_i$ 为指数基准，新块以 $\widetilde m_{ij}$ 为基准；定义旧、新两部分的换基系数 $\alpha=\exp(m_i-m_i^{\mathrm{new}})$ 和 $\beta=\exp(\widetilde m_{ij}-m_i^{\mathrm{new}})$。对任一旧分数 $s$，恒有 $e^{s-m_i^{\mathrm{new}}}=e^{s-m_i}\alpha$；新块同理乘 $\beta$。因此新分母是 $\ell_i^{\mathrm{new}}=\alpha\ell_i+\beta\widetilde\ell_{ij}$，即两部分先换到同一个最大值基准，再把指数和相加。[论文，§3.1、算法 1 第 11 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 

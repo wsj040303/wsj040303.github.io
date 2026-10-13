@@ -1,0 +1,27 @@
+/* Compact directories for sections that will grow over time. */
+.directory-shell {
+  padding: clamp(16px, 2.5vw, 36px);
+  border: 1px solid #cbd9c3;
+  border-radius: 20px;
+  background: #fffdf7;
+  box-shadow: 0 12px 35px #385d3610;
+}
+.directory-list { margin: 0; padding: 0; list-style: none; }
+.directory-list li + li { border-top: 1px solid #dbe5d4; }
+.directory-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 13px 18px;
+  border-radius: 10px;
+  transition: background .2s ease;
+}
+.directory-link:hover, .directory-link:focus-visible { background: #edf5e6; }
+.directory-link strong { color: var(--forest); font-size: clamp(17px, 1.35vw, 20px); line-height: 1.4; }
+.directory-arrow { color: #3d8652; font-size: 19px; line-height: 1; }
+
+@media (max-width: 760px) {
+  .directory-link { min-height: 56px; padding: 13px 10px; }
+}

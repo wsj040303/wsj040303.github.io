@@ -4,27 +4,6 @@
 .topic-list.inference-single { grid-template-columns: minmax(0, 1fr); }
 .topic-list.inference-single .topic-card { max-width: 750px; }
 
-/* Third-level chapter directory follows the CUDA operator list layout. */
-.chapter-directory-box { padding: 26px 42px; }
-.chapter-directory { margin: 0; padding: 0; list-style: none; }
-.chapter-directory li + li { border-top: 1px solid #d6e2ce; }
-.chapter-directory a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  min-height: 76px;
-  padding: 20px 16px;
-  color: var(--forest);
-  font-size: clamp(18px, 1.6vw, 24px);
-  font-weight: 720;
-  line-height: 1.5;
-  transition: color .2s ease, background .2s ease;
-}
-.chapter-directory a::after { content: "↗"; flex: 0 0 auto; color: #397a50; font-size: 19px; font-weight: 400; }
-.chapter-directory a:hover { color: #236c40; background: #eff5e8; }
-.chapter-directory .chapter-number { margin-right: 14px; color: #5d9562; font-size: .74em; letter-spacing: .09em; }
-
 /* Markdown-generated inference articles. */
 .reader-heading .article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
 .engine-article .article-intro { margin-bottom: 16px; }
@@ -48,7 +27,5 @@
 }
 @media (max-width: 650px) {
   .topic-list.inference-topics { grid-template-columns: minmax(0, 1fr); }
-  .chapter-directory-box { padding: 12px 18px; }
-  .chapter-directory a { min-height: 70px; padding: 16px 7px; font-size: 18px; }
   .engine-article .engine-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
 }

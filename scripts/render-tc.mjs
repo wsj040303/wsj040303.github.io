@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { marked } from "marked";
+import { marked } from "./math-markdown.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const articleDir = path.join(repo, "papers", "tensor-comprehensions");
@@ -55,7 +55,15 @@ const items = headings.map((match, index) => {
   return { name, id, index: match.index, length: match[0].length };
 });
 
-function renderMarkdown(input) {
+items.forEach((item, index) => {
+  const end = index + 1 < items.length ? items[index + 1].index : markdown.length;
+  const body = markdown.slice(item.index + item.length, end);
+  item.subheadings = marked.lexer(body)
+    .filter((token) => token.type === "heading" && token.depth === 3)
+    .map((token, subindex) => ({ name: token.text, id: item.id + "-" + (subindex + 1) }));
+});
+
+function renderMarkdown(input, subheadings = []) {
   const prepared = input.trim().replace(
     /!\[([^\]]+)\]\((images\/[^)]+)\)\n\n\*([^\n]+)\*/g,
     (_, alt, image, caption) => {
@@ -68,15 +76,15 @@ function renderMarkdown(input) {
     }
   );
   let html = marked.parse(prepared, { gfm: true });
-  html = html.replaceAll("<h3>", "<h4>").replaceAll("</h3>", "</h4>");
-  html = html.replace(
-    /<pre><code class="language-formula">([\s\S]*?)<\/code><\/pre>/g,
-    (_, content) => {
-      const value = content.trimEnd();
-      return '<div class="formula" role="math" aria-label="' +
-        value.replaceAll("\n", "；") + '">' + value + "</div>";
-    }
-  );
+  let subindex = 0;
+  html = html.replace(/<h3>([\s\S]*?)<\/h3>/g, (_, content) => {
+    const heading = subheadings[subindex++];
+    if (!heading) throw new Error("Unexpected level-three heading in article");
+    return '<h4 id="' + escapeHtml(heading.id) + '">' + content + "</h4>";
+  });
+  if (subindex !== subheadings.length) {
+    throw new Error("Missing rendered level-three heading in article");
+  }
   html = html.replace(
     /<pre><code(?: class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g,
     (_, content) => '<figure class="code-block"><pre><code>' + content + "</code></pre></figure>"
@@ -92,10 +100,17 @@ const sections = items.map((item, index) => {
   const end = index + 1 < items.length ? items[index + 1].index : markdown.length;
   const body = markdown.slice(item.index + item.length, end);
   return '<section id="' + item.id + '"><h3>' + escapeHtml(item.name) +
-    "</h3>\n" + renderMarkdown(body) + "</section>";
+    "</h3>\n" + renderMarkdown(body, item.subheadings) + "</section>";
 }).join("\n");
-const toc = items.map((item) => '<li><a href="#' + item.id + '">' +
-  escapeHtml(item.name) + "</a></li>").join("\n");
+const toc = items.map((item) => {
+  const sublist = item.subheadings.length
+    ? '<ol class="chapter-sublist">' + item.subheadings.map((heading) =>
+      '<li><a href="#' + heading.id + '">' + escapeHtml(heading.name) + "</a></li>"
+    ).join("") + "</ol>"
+    : "";
+  return '<li><a href="#' + item.id + '">' + escapeHtml(item.name) +
+    "</a>" + sublist + "</li>";
+}).join("\n");
 
 function replaceBetween(page, start, end, content) {
   const a = page.indexOf(start);

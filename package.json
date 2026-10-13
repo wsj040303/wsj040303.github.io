@@ -4,12 +4,25 @@
   "scripts": {
     "build:tc": "node scripts/render-tc.mjs",
     "check:tc": "node scripts/render-tc.mjs --check",
+    "build:sglang": "node scripts/render-sglang.mjs",
+    "check:sglang": "node scripts/render-sglang.mjs --check",
+    "build:pagedattention": "node scripts/render-pagedattention.mjs",
+    "check:pagedattention": "node scripts/render-pagedattention.mjs --check",
     "build:cuda": "node scripts/render-cuda.mjs",
     "check:cuda": "node scripts/render-cuda.mjs --check",
+    "build:vattention": "node scripts/render-vattention.mjs",
+    "check:vattention": "node scripts/render-vattention.mjs --check",
+    "build:flashattention": "node scripts/render-flashattention.mjs",
+    "check:flashattention": "node scripts/render-flashattention.mjs --check",
+    "build:flashattention2": "node scripts/render-flashattention2.mjs",
+    "check:flashattention2": "node scripts/render-flashattention2.mjs --check",
+    "build:awq": "node scripts/render-awq.mjs",
+    "check:awq": "node scripts/render-awq.mjs --check",
     "build:inference": "node scripts/render-inference.mjs",
     "check:inference": "node scripts/render-inference.mjs --check"
   },
   "devDependencies": {
+    "katex": "^0.16.47",
     "marked": "16.4.2"
   }
 }

@@ -8,7 +8,6 @@
     <title>CUDA · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../../assets/garden.css">
-    <link rel="stylesheet" href="../../assets/directory.css">
     <script src="../../assets/site.js" defer></script>
   </head>
   <body>
@@ -30,12 +29,21 @@
         <div class="page-heading">
           <h1>CUDA</h1>
         </div>
-        <section class="directory-shell" aria-label="CUDA 章节目录">
-          <ul class="directory-list">
-            <li><a class="directory-link" href="../cuda.html"><strong>CUDA 编程基础</strong><span>Grid、Block、Warp、内存层次与第一个 Kernel。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
-            <li><a class="directory-link" href="performance.html"><strong>CUDA 性能测试与调优</strong><span>建立性能基线，使用 Nsight 工具定位瓶颈并验证优化。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
-            <li><a class="directory-link" href="../operators/index.html?v=20261013"><strong>CUDA算子</strong><span>按算子类型浏览归约、逐点运算、上采样、GEMV 与原子加。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
-          </ul>
+        <section class="catalog-box" aria-label="CUDA 章节目录">
+          <div class="topic-list">
+            <a class="topic-card" href="../cuda.html">
+              <h2>CUDA 编程基础</h2>
+              <p>介绍 Grid、Block、Warp 与 SIMT、SM 硬件映射及内存空间。</p>
+            </a>
+            <a class="topic-card" href="performance.html">
+              <h2>CUDA 性能测试与调优</h2>
+              <p>用 CUDA Event 建立基线，借助 Nsight 工具定位瓶颈并验证优化。</p>
+            </a>
+            <a class="topic-card" href="../operators/index.html?v=20261013">
+              <h2>CUDA算子</h2>
+              <p>归约、逐点运算、上采样、GEMV 与原子加，按类型继续浏览。</p>
+            </a>
+          </div>
         </section>
       </main>
     </div>

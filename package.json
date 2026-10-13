@@ -14,6 +14,8 @@
     "check:vattention": "node scripts/render-vattention.mjs --check",
     "build:flashattention": "node scripts/render-flashattention.mjs",
     "check:flashattention": "node scripts/render-flashattention.mjs --check",
+    "build:flashattention2": "node scripts/render-flashattention2.mjs",
+    "check:flashattention2": "node scripts/render-flashattention2.mjs --check",
     "build:awq": "node scripts/render-awq.mjs",
     "check:awq": "node scripts/render-awq.mjs --check"
   },

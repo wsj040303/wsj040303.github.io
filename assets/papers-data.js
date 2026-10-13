@@ -68,6 +68,17 @@ window.PAPER_ENTRIES = [
     url: "https://arxiv.org/abs/2309.06180"
   },
   {
+    title: "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+    shortName: "FlashAttention-2",
+    aliases: ["FA2", "FlashAttention 2", "序列并行注意力", "Warp 工作划分"],
+    category: "operators",
+    year: "2023",
+    venue: "arXiv",
+    summary: "解释在线 Softmax 改写、序列维度并行、反向梯度归约与 Warp 分工，并核对 A100 实验。",
+    articleUrl: "flashattention-2/",
+    url: "https://arxiv.org/abs/2307.08691"
+  },
+  {
     title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
     shortName: "FlashAttention",
     aliases: ["闪存注意力"],

@@ -32,3 +32,7 @@ my notes-especially for ai-infra
 ## 编辑 AWQ 阅读报告
 
 正文源文件是 [papers/awq/article.md](papers/awq/article.md)，原文图放在同目录的 `images/`。修改后运行 `npm run build:awq` 生成 HTML，再运行 `npm run check:awq` 核对。
+
+## 编辑 FlashAttention-2 阅读报告
+
+正文源文件是 [papers/flashattention-2/article.md](papers/flashattention-2/article.md)，原文图放在同目录的 `images/`。修改后运行 `npm run build:flashattention2` 生成 HTML，再运行 `npm run check:flashattention2` 核对。

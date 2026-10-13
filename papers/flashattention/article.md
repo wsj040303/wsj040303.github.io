@@ -35,36 +35,84 @@ FlashAttention 要同时满足两项约束：前向不能预先看到一整行 $
 
 ## 方法原理
 
-### 分块布局与循环顺序
+### 算法 1 的输入、分块与状态
 
-算法 1 将 $Q$ 按行切为 $B_r\times d$ 的块，将 $K,\;V$ 按相同位置切为 $B_c\times d$ 的块。对一对块，只在片上形成 $B_r\times B_c$ 的局部分数 $S_{ij}=Q_iK_j^{\mathsf T}$；当前块的指数权重立刻用于 $\widetilde P_{ij}V_j$，随后可以释放局部分数。论文给出示意块大小 $B_c=\lfloor M/(4d)\rfloor$、$B_r=\min(\lfloor M/(4d)\rfloor,d)$，以容纳输入块、局部分数和行状态；具体内核的取值还受硬件资源与性能权衡影响。[论文，§3.1、算法 1](https://arxiv.org/pdf/2205.14135v2#page=5)
+论文算法 1 计算单个注意力头、暂不施加掩码和 Dropout 的前向结果。输入 $Q,K,V\in\mathbb{R}^{N\times d}$ 均在 HBM 中：$N$ 是序列长度，$d$ 是单头维度，三者的第 $t$ 行分别是位置 $t$ 的查询、键和值。目标输出 $O=\operatorname{softmax}(QK^{\mathsf T})V\in\mathbb{R}^{N\times d}$；算法中的 $M$ 表示可用于分块计算的片上 SRAM 容量，单位是**元素数**。论文算法 1 将缩放系数略去，附录 B 再加入缩放、掩码和 Dropout。[论文，§3.1、算法 1](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+| 符号 | 定义与尺寸 |
+| --- | --- |
+| $B_r,B_c$ | 一个查询块和一个键/值块各包含的行数；前者每行对应一个独立查询，后者每行对应一对位置相同的键和值。 |
+| $T_r,T_c$ | 查询块数与键/值块数；$i\in\{1,\ldots,T_r\}$ 是查询块编号，$j\in\{1,\ldots,T_c\}$ 是键/值块编号。 |
+| $Q_i,\;O_i$ | 第 $i$ 个查询块及其当前部分输出，尺寸均为 $B_r\times d$。 |
+| $K_j,\;V_j$ | 第 $j$ 个键块和值块，尺寸均为 $B_c\times d$；同一局部行指向同一 token 位置。 |
+| $m_i,\;\ell_i$ | 第 $i$ 个查询块中各行**已处理键**的分数最大值与指数和，均为长度 $B_r$ 的向量。 |
+| $S_{ij},\;\widetilde P_{ij}$ | 当前查询块与键块生成的分数矩阵，以及相对于当前块最大值计算的未归一化指数矩阵，尺寸均为 $B_r\times B_c$。 |
+| $\widetilde m_{ij},\;\widetilde\ell_{ij}$ | 当前分数块每行的最大值及指数和，均为长度 $B_r$ 的向量；波浪号表示它们只针对当前键块。 |
+
+把所有查询行的最大值和指数和分别合在一起，记为长度 $N$ 的向量 $m,\ell$；$m_i,\ell_i$ 是它们对应第 $i$ 个查询块的切片。这些行状态有明确的含义。固定一行查询 $q$，令 $J$ 为已经处理过的键位置集合；$k_t,v_t$ 是位置 $t\in J$ 的键和值，$s_t=qk_t^{\mathsf T}$ 是该位置的分数。对同一行的所有指数同时减去常数 $m$，相当于给 Softmax 的分子和分母同乘 $e^{-m}$，所以概率不变：$e^{s_t}/\sum_{u\in J}e^{s_u}=e^{s_t-m}/\sum_{u\in J}e^{s_u-m}$。选择该行最大分数作 $m$，还能使指数自变量不大于零。处理完任一键块后，状态满足
+
+$$
+m=\max_{t\in J}s_t,\qquad
+\ell=\sum_{t\in J}e^{s_t-m},\qquad
+o=\frac{\sum_{t\in J}e^{s_t-m}v_t}{\ell}.
+$$
+
+因此，$m$ 是数值稳定的指数计算基准，$\ell$ 是到目前为止的归一化分母，$o$ 是**仅针对已处理键归一化**的部分输出。$m_i,\ell_i,O_i$ 将这个不变量同时应用于查询块中的 $B_r$ 行。尚未处理任何键时，算法约定 $m=-\infty,\ell=0,o=0$；此时 $o$ 只是初始化值，首个键块处理后才成为归一化输出。[论文，§3.1、算法 1 第 2、10–13 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
 ![原文图 1：片上 SRAM、HBM 以及 K/V 外循环和 Q 内循环的分块数据流](images/原文图1-分块与HBM访问.png)
 
 *图 1：左侧是内存层次；中间的红色外循环依次装入键/值块，蓝色内循环处理查询块，虚线框是仅在片上存在的局部分数；右侧给出论文的 GPT-2 注意力实现时间对照。截取自[Dao 等，2022，原文图 1](https://arxiv.org/pdf/2205.14135v2#page=2)。*
 
-沿图 1 中间的箭头看，外循环先将某个 $K_{j},\;V_{j}$ 从 HBM 搬到片上，内循环让它们依次与所有 $Q_{i}$ 配对；每个 $Q_{i}$ 的输出及行统计量更新后写回，等待下一个键/值块。$K_{j}$ 和 $V_{j}$ 同时装入是因为注意力权重必须乘对应位置的 $V_{j}$。**键/值在外层是本算法的数据复用安排，并非注意力语义强制的唯一循环顺序**：这样每个键/值块可跨多个查询块复用，代价是查询、部分输出与统计量随外循环多次读写。图右的柱形图只比较该图对应的 GPT-2 注意力计算时间，不代表整模型训练加速比。[论文，图 1、算法 1 第 5–13 行](https://arxiv.org/pdf/2205.14135v2#page=2)
+图 1 中，每个 $K_j,V_j$ 在红色外循环中装入片上，再与蓝色内循环遍历的所有 $Q_i$ 配对。每对块只临时产生一个 $B_r\times B_c$ 分数块，输出及行状态随处理过程更新。键和值同时装入，是因为第 $t$ 个键得到的注意力权重必须用于第 $t$ 个值；将键/值放在外层则让同一块跨多个查询块复用。代价是 $Q_i,O_i,m_i,\ell_i$ 会随不同的 $j$ 多次从 HBM 读写。这是算法 1 选定的数据复用顺序，并非注意力定义强制的唯一循环顺序。[论文，图 1、算法 1 第 5–13 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
-### 在线 Softmax 与精确输出
+### 算法 1 的逐块计算
 
-普通 Softmax 对一行分数 $x$ 可稳定地写成 $m=\max(x)$、$\ell=\sum _{j} \exp(x_{j}-m)$、$p_{j}=\exp(x_{j}-m)/\ell$。减去最大值不改变分子与分母的比值，并使每个指数的自变量不大于 0，降低上溢风险。分块时完整的 $m$ 和 $\ell$ 尚不可知，因此算法对每一行保存已处理键的最大值 $m_{\mathrm{old}}$、指数和 $\ell_{\mathrm{old}}$ 与**已经归一化的部分输出** $O_{\mathrm{old}}$；新块分别产生局部最大值 $\widetilde{m}$、未归一化指数向量 $\widetilde{P}=\exp(S_{\mathrm{block}}-\widetilde{m})$ 和局部和 $\widetilde{\ell}$。[论文，§3.1、算法 1 第 9–12 行](https://arxiv.org/pdf/2205.14135v2#page=4)
+![原文算法 1：FlashAttention 前向计算的分块、局部统计量与输出更新](images/原文算法1-前向计算.png)
 
-合并时，先取 $m_{\mathrm{new}}=\max(m_{\mathrm{old}},\widetilde{m})$。旧块与新块的指数都要改用这个共同基准，再相加：
+*原文算法 1：黄色标记区域依次给出块大小与初始化、第 5–8 行的双层循环、第 9–10 行的局部分数和统计量、第 11–13 行的状态合并与写回。截取自[Dao 等，2022，原文算法 1](https://arxiv.org/pdf/2205.14135v2#page=5)。*
+
+以下按原文算法 1 的执行顺序展开。用于行统计量的最大值、指数、缩放与除法均按查询行独立计算；例如长度 $B_r$ 的向量从一个 $B_r\times B_c$ 矩阵相减，表示向量的每个分量作用于对应整行。
+
+1. **确定块大小并划分输入（第 1、3–4 行）。** 算法取 $B_c=\lceil M/(4d)\rceil$、$B_r=\min(\lceil M/(4d)\rceil,d)$，从而得到 $T_c=\lceil N/B_c\rceil$ 个键/值块和 $T_r=\lceil N/B_r\rceil$ 个查询块。$Q,O,m,\ell$ 都按查询行划成相同的 $T_r$ 块，$K,V$ 按键的位置划成相同的 $T_c$ 块；不足一个整块的尾部仅处理有效位置。式中的 $4$ 是论文块大小构造采用的常数系数，具体内核仍受片上资源限制。[论文，算法 1 第 1、3–4 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+2. **初始化行状态（第 2 行）。** 在 HBM 中把 $O$ 初始化为零矩阵，把每行的 $\ell$ 初始化为 $0$、$m$ 初始化为 $-\infty$。这表示尚未见到任何键：当前没有指数贡献，也没有可用的最大分数。初始化的 $O=0$ 与 $\ell=0$ 使第一块的旧输出贡献为零。[论文，算法 1 第 2 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+3. **装入一个键/值块（第 5–6 行）。** 外循环按 $j=1,\ldots,T_c$ 遍历，从 HBM 将 $K_j,V_j$ 装入片上 SRAM。整个内循环处理所有查询块期间复用这对键和值。[论文，算法 1 第 5–6 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+4. **装入一个查询块及其旧状态（第 7–8 行）。** 对当前 $j$，内循环按 $i=1,\ldots,T_r$ 遍历；每次读入 $Q_i,O_i,m_i,\ell_i$。$O_i,m_i,\ell_i$ 包含此前 $j-1$ 个键/值块留下的状态，因此后续更新必须以它们为起点。[论文，算法 1 第 7–8 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+5. **计算当前分数块（第 9 行）。** 片上矩阵乘法生成 $S_{ij}=Q_iK_j^{\mathsf T}\in\mathbb{R}^{B_r\times B_c}$。其中第 $a$ 行、第 $b$ 列是查询块中第 $a$ 个查询与键块中第 $b$ 个键的点积；$a$ 和 $b$ 分别是块内查询、键的行号。该分数块随后在片上消费，不写成 HBM 中的完整 $N\times N$ 矩阵。[论文，算法 1 第 9 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+6. **计算当前块的局部 Softmax 统计量（第 10 行）。** 令 $\operatorname{rowmax}$ 表示按行取最大值，$\operatorname{rowsum}$ 表示按行求和。先算 $\widetilde m_{ij}=\operatorname{rowmax}(S_{ij})$；再逐元素计算相对于这个最大值的指数 $\widetilde P_{ij}=\exp(S_{ij}-\widetilde m_{ij})$；最后求 $\widetilde\ell_{ij}=\operatorname{rowsum}(\widetilde P_{ij})$。减去行最大值使指数自变量不大于零。$\widetilde P_{ij}$ 尚未除以整行所有键的分母，因此不是最终注意力概率。[论文，§3.1、算法 1 第 10 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+7. **合并最大值与分母（第 11 行）。** 逐行令 $m_i^{\mathrm{new}}=\max(m_i,\widetilde m_{ij})$。旧状态以 $m_i$ 为指数基准，新块以 $\widetilde m_{ij}$ 为基准；定义旧、新两部分的换基系数 $\alpha=\exp(m_i-m_i^{\mathrm{new}})$ 和 $\beta=\exp(\widetilde m_{ij}-m_i^{\mathrm{new}})$。对任一旧分数 $s$，恒有 $e^{s-m_i^{\mathrm{new}}}=e^{s-m_i}\alpha$；新块同理乘 $\beta$。因此新分母是 $\ell_i^{\mathrm{new}}=\alpha\ell_i+\beta\widetilde\ell_{ij}$，即两部分先换到同一个最大值基准，再把指数和相加。[论文，§3.1、算法 1 第 11 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+8. **合并加权和并归一化输出（第 12 行）。** 对一行，定义旧的未归一化加权和 $u_{\mathrm{old}}=\ell_{\mathrm{old}}o_{\mathrm{old}}$；当前块的未归一化加权和则是该行的 $\widetilde P_{ij}V_j$。它们也必须分别乘 $\alpha$ 和 $\beta$，得到 $u_{\mathrm{new}}=\alpha u_{\mathrm{old}}+\beta\widetilde P_{ij}V_j$，最后以新分母求 $o_{\mathrm{new}}=u_{\mathrm{new}}/\ell_{\mathrm{new}}$。新块已经形成未归一化加权和，不能再额外乘一次 $\widetilde\ell_{ij}$。[论文，§3.1、算法 1 第 12 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+9. **写回并继续循环（第 12–16 行）。** 将新 $O_i,\ell_i,m_i$ 写回 HBM，继续处理下一个查询块；当前 $K_j,V_j$ 与全部查询块配对后，外循环才装入下一对键/值块。处理完 $T_c$ 个键/值块后，每行状态覆盖全部 $N$ 个键，返回的 $O$ 就是完整的 $\operatorname{softmax}(QK^{\mathsf T})V$。[论文，算法 1 第 12–16 行、定理 1](https://arxiv.org/pdf/2205.14135v2#page=5)
+
+把第 7–8 步写成查询块的向量和矩阵形式，即原文第 11–12 行的更新公式：
 
 $$
 \begin{aligned}
-\ell_{\mathrm{new}} &= e^{m_{\mathrm{old}}-m_{\mathrm{new}}}\ell_{\mathrm{old}}
-  + e^{\widetilde m-m_{\mathrm{new}}}\widetilde\ell, \\
-O_{\mathrm{new}} &= \frac{e^{m_{\mathrm{old}}-m_{\mathrm{new}}}\ell_{\mathrm{old}}O_{\mathrm{old}}
-  + e^{\widetilde m-m_{\mathrm{new}}}\widetilde P V_{\mathrm{block}}}{\ell_{\mathrm{new}}}
+m_i^{\mathrm{new}} &= \max(m_i,\widetilde m_{ij}),\\
+\ell_i^{\mathrm{new}} &= e^{m_i-m_i^{\mathrm{new}}}\ell_i
+    +e^{\widetilde m_{ij}-m_i^{\mathrm{new}}}\widetilde\ell_{ij},\\
+O_i^{\mathrm{new}} &=
+\operatorname{diag}(\ell_i^{\mathrm{new}})^{-1}
+\left[
+\operatorname{diag}\!\left(e^{m_i-m_i^{\mathrm{new}}}\ell_i\right)O_i
++\operatorname{diag}\!\left(e^{\widetilde m_{ij}-m_i^{\mathrm{new}}}\right)
+\widetilde P_{ij}V_j
+\right].
 \end{aligned} \tag{2}
 $$
 
-$\ell_{\mathrm{old}}\cdot O_{\mathrm{old}}$ 把已归一化的旧输出还原为旧基准下的未归一化加权和。新块的 $\widetilde{P} V_{\mathrm{block}}$ 本身已经是未归一化加权和，**无需再乘一次 $\widetilde{\ell}$**。这两个量分别按最大值变化缩放后相加，最后除以共同的 $\ell_{\mathrm{new}}$；数学上等于一次对全部已处理键计算 Softmax。[论文，§3.1、算法 1 第 10–12 行](https://arxiv.org/pdf/2205.14135v2#page=5)
+$\operatorname{diag}(x)$ 指以向量 $x$ 为对角线的矩阵；左乘它，相当于用 $x$ 的对应分量缩放矩阵的每一行。第一项把旧的已归一化输出恢复为未归一化加权和，再按新最大值缩放；第二项把当前块的加权和按相同基准缩放。最外层的逆对角矩阵则逐行除以新分母。原文第 12 行用较紧凑的逐行广播记号表达同一计算；这里展开对角矩阵以标明每个因子的作用。[论文，§3.1、算法 1 第 11–12 行](https://arxiv.org/pdf/2205.14135v2#page=5)
 
-一个**解释性构造**可以核对数值。设某一行的四个分数为 $[1,2,3,0]$，对应的标量值为 $[10,20,30,40]$，每块含两个键。第一块的 $m_{1}=2$、$\ell_{1}=e^{-1}+1\approx 1.3679$、未归一化加权和 $u_{1}=10e^{-1}+20\approx 23.6788$，所以部分输出 $O_{1}=u_{1}/\ell_{1}\approx 17.3106$。第二块的 $\widetilde{m}_{2}=3$、$\widetilde{\ell}_{2}=1+e^{-3}\approx 1.0498$、$\widetilde{u}_{2}=30+40e^{-3}\approx 31.9915$。统一到最大值 3 后，$\ell_{\mathrm{new}}=e^{-1}\ell_{1}+\widetilde{\ell}_{2}\approx 1.5530$、$u_{\mathrm{new}}=e^{-1}u_{1}+\widetilde{u}_{2}\approx 40.7024$，得到 $O_{\mathrm{new}}\approx 26.2089$。直接对四个分数一次求 Softmax，也得到 $\frac{10e^{-2}+20e^{-1}+30+40e^{-3}}{e^{-2}+e^{-1}+1+e^{-3}}\approx26.2089$。这个算例用于解释公式，不是论文的输入或测量。[论文，§3.1](https://arxiv.org/pdf/2205.14135v2#page=4)
+当处理过的键集合从 $J$ 扩展为 $J$ 与当前块的并集时，旧块和新块在上式中都被换到共同的 $m_i^{\mathrm{new}}$ 基准；因此行状态仍满足前述不变量。这说明分块更新所得的输出与一次看见所有分数后计算 Softmax 在实数运算下相同。实际浮点归约次序可能带来数值差异。[论文，§3.1、定理 1](https://arxiv.org/pdf/2205.14135v2#page=5)
 
-掩码可以在局部分数形成后、Softmax 之前施加：不允许的键位置设为 $-\infty$，其指数贡献为零。Dropout 则作用于概率与值的乘积，并须在反向重算时重现同一随机掩码；论文附录的实现保存伪随机数生成器状态以满足这一点。分块不会让不同键位置脱离同一行的归一化，只改变生成概率和消费概率的时机。[论文，附录 B.3–B.4](https://arxiv.org/pdf/2205.14135v2#page=20)
+掩码可在局部分数形成后、Softmax 之前施加：不允许的键位置设为 $-\infty$，其指数贡献为零。Dropout 则作用于概率与值的乘积，并须在反向重算时重现同一随机掩码；论文附录的实现保存伪随机数生成器状态以满足这一点。算法 1 的核心推导针对未加这些操作的注意力；附录 B 讨论带缩放、掩码和 Dropout 的实现。[论文，附录 B.3–B.4](https://arxiv.org/pdf/2205.14135v2#page=20)
 
 ### 反向重算与存储代价
 
@@ -85,6 +133,34 @@ $$
 定理 1 给出的额外存储为 $O(N)$，指**在输入 $Q,\;K,\;V$ 和输出 $O$ 之外**的行最大值、行和等状态；输入输出自身仍有 $O(Nd)$ 个元素。反向的梯度张量也各占 $O(Nd)$。因此，对固定头维度 $d$，注意力相关的中间存储随 $N$ 线性增长，而不是整个 Transformer 的所有显存占用都成为 $O(N)$。[论文，定理 1、附录 B.4](https://arxiv.org/pdf/2205.14135v2#page=5)
 
 论文命题 3 的下界有明确量词：**不存在一种算法在该区间的所有 $M$ 上都达到 $o(N^{2}d^{2}/M)$ 次片外访问**。证明取 $M=\Theta (Nd)$ 时至少必须读入或写出 $\Omega (Nd)$ 个元素。这一论证不能单独推出“对每一个固定的 $M$，FlashAttention 都达到逐点最优下界”；论文也把更细的参数化下界列为后续工作。此区分影响对“IO 最优”的理解。[论文，§3.2、命题 3](https://arxiv.org/pdf/2205.14135v2#page=6)
+
+### 算法 1 的计算示例
+
+以下是**解释性构造**，只用于逐项核对算法 1 的公式，不是论文中的实验或实际 GPU 块配置。取 $N=4,d=1,M=8$ 个元素，并给出完整的单头输入：
+
+$$
+Q=\begin{bmatrix}1\\0\\0\\0\end{bmatrix},\qquad
+K=\begin{bmatrix}1\\2\\3\\0\end{bmatrix},\qquad
+V=\begin{bmatrix}10\\20\\30\\40\end{bmatrix}.
+$$
+
+由第 1 步得到 $B_c=\lceil 8/(4\cdot1)\rceil=2$、$B_r=\min(2,1)=1$，所以 $T_c=2,T_r=4$。键/值块依次是 $K_1=[1,2]^{\mathsf T},V_1=[10,20]^{\mathsf T}$ 和 $K_2=[3,0]^{\mathsf T},V_2=[30,40]^{\mathsf T}$。每轮外循环仍会遍历四个查询块；下面完整展开第一个查询 $q_1=1$ 的状态变化。
+
+1. **初始化。** 第一个查询的状态为 $m=-\infty,\ell=0,o=0$。尚无键进入已处理集合。
+
+2. **处理第一个键/值块。** $q_1K_1^{\mathsf T}=[1,2]$，故 $\widetilde m=2$、$\widetilde P=[e^{-1},1]$、$\widetilde\ell=e^{-1}+1\approx1.3679$。旧状态的贡献为零，更新后 $m=2,\ell=1.3679$，且 $o=(10e^{-1}+20)/(e^{-1}+1)\approx17.3106$。此时输出只对前两个键归一化。
+
+3. **处理第二个键/值块。** $q_1K_2^{\mathsf T}=[3,0]$，故 $\widetilde m=3$、$\widetilde P=[1,e^{-3}]$、$\widetilde\ell=1+e^{-3}\approx1.0498$。新最大值为 $3$，旧块换基系数 $\alpha=e^{2-3}=e^{-1}$，新块系数 $\beta=e^{3-3}=1$。分母变为 $\ell_{\mathrm{new}}=e^{-1}(1+e^{-1})+(1+e^{-3})\approx1.5530$；未归一化加权和变为 $u_{\mathrm{new}}=e^{-1}(10e^{-1}+20)+(30+40e^{-3})\approx40.7024$，于是 $o_{\mathrm{new}}=u_{\mathrm{new}}/\ell_{\mathrm{new}}\approx26.2089$。
+
+4. **核对完整输出。** 直接对 $q_1$ 的四个分数 $[1,2,3,0]$ 求一次 Softmax，会得到同样的结果：
+
+$$
+o_1=\frac{10e^{-2}+20e^{-1}+30+40e^{-3}}
+           {e^{-2}+e^{-1}+1+e^{-3}}
+    \approx26.2089.
+$$
+
+其余三个查询都是 $0$，各自对四个键的分数均为 $0$，所以各值的注意力权重都是 $1/4$，输出均为 $(10+20+30+40)/4=25$。整个矩阵输出为 $O\approx[26.2089,25,25,25]^{\mathsf T}$。示例同时核对了“先对旧部分按新最大值缩放，再加入新部分”的必要性：若省去第二轮的 $e^{-1}$，两个块的指数分子会使用不同基准，结果就不再等于完整 Softmax。[论文，§3.1、算法 1](https://arxiv.org/pdf/2205.14135v2#page=5)
 
 ## 实验与证据
 

@@ -10,27 +10,18 @@
 .directory-list li + li { border-top: 1px solid #dbe5d4; }
 .directory-link {
   display: grid;
-  grid-template-columns: minmax(190px, .65fr) minmax(0, 1.35fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: clamp(12px, 2.5vw, 34px);
-  min-height: 76px;
-  padding: 16px 18px;
+  gap: 12px;
+  min-height: 62px;
+  padding: 13px 18px;
   border-radius: 10px;
   transition: background .2s ease;
 }
 .directory-link:hover, .directory-link:focus-visible { background: #edf5e6; }
 .directory-link strong { color: var(--forest); font-size: clamp(17px, 1.35vw, 20px); line-height: 1.4; }
-.directory-link > span:not(.directory-arrow) { color: var(--muted); font-size: 13px; line-height: 1.65; }
 .directory-arrow { color: #3d8652; font-size: 19px; line-height: 1; }
-.directory-group + .directory-group { margin-top: 30px; }
-.directory-group h2 { margin: 0 18px 10px; color: var(--forest); font-size: 21px; }
-.directory-note { margin: 28px 18px 0; padding-top: 22px; border-top: 1px solid #dbe5d4; color: var(--muted); font-size: 13px; line-height: 1.7; }
 
 @media (max-width: 760px) {
-  .directory-link { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; min-height: 0; padding: 16px 10px; }
-  .directory-link > span:not(.directory-arrow) { grid-column: 1; grid-row: 2; }
-  .directory-arrow { grid-column: 2; grid-row: 1 / span 2; }
-  .directory-group + .directory-group { margin-top: 24px; }
-  .directory-group h2 { margin-inline: 10px; font-size: 19px; }
-  .directory-note { margin-inline: 10px; }
+  .directory-link { min-height: 56px; padding: 13px 10px; }
 }

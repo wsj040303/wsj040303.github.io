@@ -8,6 +8,7 @@
     <title>CUDA · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/directory.css">
     <script src="../../assets/site.js" defer></script>
   </head>
   <body>
@@ -29,38 +30,12 @@
         <div class="page-heading">
           <h1>CUDA</h1>
         </div>
-        <section class="catalog-box" aria-label="CUDA 文章目录">
-          <div class="topic-list is-operator">
-            <a class="topic-card" href="../cuda.html">
-              <h2>CUDA 编程基础</h2>
-              <p>介绍 Grid、Block、Warp 与 SIMT、SM 硬件映射、内存空间和常见算子优化方向。</p>
-            </a>
-            <a class="topic-card" href="performance.html">
-              <h2>CUDA 性能测试与调优</h2>
-              <p>用 CUDA Event 建立基线，借助 Nsight Systems 与 Nsight Compute 定位开销，并用实测对照验证访存优化。</p>
-            </a>
-            <a class="topic-card" href="../operators/reduce.html">
-              <h2>归约求和</h2>
-              <p>把一个数组求和收成一个数。从 shared memory 树形归约出发，经 9 个版本压到显存带宽上限。</p>
-            </a>
-            <a class="topic-card" href="../operators/elementwise.html">
-              <h2>逐点运算</h2>
-              <p>r[i] = f(a[i], b[i])，形状不变。OneFlow 模板把 half 的 2 字节访存打包成 128 位。</p>
-            </a>
-            <a class="topic-card" href="../operators/upsample-nearest2d.html">
-              <h2>最近邻 2 倍上采样</h2>
-              <p>每个输入像素复制成 2×2 输出块，元素数 ×4。用 Pack2X 把写宽度翻倍，反向顺便甩掉 atomicAdd。</p>
-            </a>
-            <a class="topic-card" href="../operators/gemv.html">
-              <h2>矩阵向量乘</h2>
-              <p>y = A·x，一个 warp 承包一行。标量读 → float4 向量化 → 一个 warp 管两行。</p>
-            </a>
-            <a class="topic-card" href="../operators/fast-atomic-add.html">
-              <h2>半精度原子加</h2>
-              <p>3350 万条原子指令打向同一个地址。把 2 字节原子加换成 4 字节，靠 pack 或运行期对齐凑宽度。</p>
-            </a>
-          </div>
-          <p class="catalog-note">算子优化文章的实测环境：RTX 5070（sm_120）与 CUDA 13.4。测试方法见各篇性能章节。</p>
+        <section class="directory-shell" aria-label="CUDA 章节目录">
+          <ul class="directory-list">
+            <li><a class="directory-link" href="../cuda.html"><strong>CUDA 编程基础</strong><span>Grid、Block、Warp、内存层次与第一个 Kernel。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
+            <li><a class="directory-link" href="performance.html"><strong>CUDA 性能测试与调优</strong><span>建立性能基线，使用 Nsight 工具定位瓶颈并验证优化。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
+            <li><a class="directory-link" href="../operators/index.html?v=20261013"><strong>CUDA算子</strong><span>按算子类型浏览归约、逐点运算、上采样、GEMV 与原子加。</span><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
+          </ul>
         </section>
       </main>
     </div>

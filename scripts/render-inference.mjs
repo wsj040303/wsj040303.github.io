@@ -28,6 +28,14 @@ const chapters = [
     description: "sequence.py 完整注释代码及请求状态、token 计数、KV 块视图与跨进程序列化的源码解析。",
     deck: "第 3 章 · 完整注释代码与请求状态",
     previous: { href: "02-llm-engine.html", text: "上一章：llm_engine.py" },
+    next: { href: "04-scheduler.html", text: "下一章：scheduler.py" },
+  },
+  {
+    stem: "04-scheduler",
+    sourceFile: "scheduler.py",
+    description: "scheduler.py 完整注释代码及 KV 块抢占、共享前缀、分块 prefill 和运行队列操作的源码解析。",
+    deck: "第 4 章 · 完整注释代码与调度决策",
+    previous: { href: "03-sequence.html", text: "上一章：sequence.py" },
     next: null,
   },
 ];

@@ -264,7 +264,8 @@
 <p><code>__setstate__()</code> 按固定元组顺序恢复长度、缓存进度、块表和最后状态。若最后一项是列表，就恢复 <code>token_ids</code> 并从末尾取 <code>last_token</code>；若是整数，就只保存该 <code>last_token</code>，把 worker 本地 <code>token_ids</code> 置为空列表。这里恢复的是执行器当前计算所需的字段，不是把主进程中的完整请求对象原样复制一份。</p>
 </section>
             <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
-<a href="02-llm-engine.html">上一章：llm_engine.py</a></div>
+<a href="02-llm-engine.html">上一章：llm_engine.py</a>
+<a href="04-scheduler.html">下一章：scheduler.py</a></div>
           </article>
         </div>
       </main>

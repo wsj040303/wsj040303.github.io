@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="scheduler.py 完整注释代码及 KV 块抢占、共享前缀、分块 prefill 和运行队列操作的源码解析。">
+    <meta name="theme-color" content="#0b2015">
+    <title>scheduler.py: 选择每轮请求并管理 KV 块资源 · WSJ</title>
+    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../../assets/garden.css">
+    <link rel="stylesheet" href="../../../assets/inference.css?v=20261014-python">
+    <script src="../../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../../index.html">首页</a><a href="../../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../../papers/index.html">论文阅读</a><a href="../../../projects/index.html">GitHub 项目</a><a href="../../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../../index.html">首页</a><span>/</span><a href="../../../ai-infra/index.html">AI Infra</a><span>/</span><a href="../index.html">推理引擎编写</a><span>/</span><a href="index.html">Nano-vLLM 解读</a><span>/</span>scheduler.py: 选择每轮请求并管理 KV 块资源</nav>
+        <div class="reader-heading"><h1>scheduler.py: 选择每轮请求并管理 KV 块资源</h1><p class="article-deck">第 4 章 · 完整注释代码与调度决策</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">KV 块不足时的抢占</a></li>
+<li><a href="#section-2">共享前缀与分块 prefill 的剩余计算量</a></li>
+<li><a href="#section-3">运行队列为何先取出再放回</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<figure class="engine-code is-complete"><figcaption>完整代码 · scheduler.py <span>Python</span></figcaption><pre><code><span class="tok-keyword">from</span> collections <span class="tok-keyword">import</span> deque
+<span class="tok-keyword">from</span> nanovllm.config <span class="tok-keyword">import</span> Config
+<span class="tok-keyword">from</span> nanovllm.engine.sequence <span class="tok-keyword">import</span> Sequence, SequenceStatus
+<span class="tok-keyword">from</span> nanovllm.engine.block_manager <span class="tok-keyword">import</span> BlockManager
+
+<span class="tok-keyword">class</span> Scheduler:
+
+    <span class="tok-keyword">def</span> __init__(self, config: Config):
+        self.max_num_seqs = config.max_num_seqs
+        self.max_num_batched_tokens = config.max_num_batched_tokens
+        self.eos = config.eos
+        self.block_size = config.kvcache_block_size
+        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
+        <span class="tok-comment"># self.waiting - 变量名（实例属性）deque[Sequence] - 类型注解- deque 是容器类型（双端队列）- [Sequence] 说明这个 deque 里存放的是 Sequence 类型的对象- 相当于告诉别人：&quot;这是一个装着 Sequence 对象的 deque&quot;</span>
+        self.waiting: deque[Sequence] = deque()<span class="tok-comment"># 等待队列，包含新请求和需要继续 prefill 或抢占后重新进入的请求。</span>
+        self.running: deque[Sequence] = deque()<span class="tok-comment"># 运行队列，包含完整 prompt 已被安排处理、后续可能进行 decode 的请求。</span>
+
+    <span class="tok-keyword">def</span> is_finished(self):   <span class="tok-comment">#供 LLMEngine.generate() 结束循环。</span>
+        <span class="tok-keyword">return</span> <span class="tok-keyword">not</span> self.waiting <span class="tok-keyword">and</span> <span class="tok-keyword">not</span> self.running
+
+    <span class="tok-keyword">def</span> add(self,seq: Sequence):
+        self.waiting.append(seq)
+
+        <span class="tok-comment"># schedule() 返回 list[Sequence] 与 bool。布尔值为 True 表示本轮走 prefill，False 表示 decode。</span>
+    <span class="tok-keyword">def</span> schedule(self) -&gt; tuple[<span class="tok-builtin">list</span>[Sequence], <span class="tok-builtin">bool</span>]:
+        scheduled_seqs = []
+        num_batched_tokens = <span class="tok-number">0</span>
+
+        <span class="tok-keyword">while</span> self.waiting <span class="tok-keyword">and</span> <span class="tok-builtin">len</span>(scheduled_seqs) &lt; self.max_num_seqs:
+            seq = self.waiting[<span class="tok-number">0</span>]
+            remaining = self.max_num_batched_tokens - num_batched_tokens  <span class="tok-comment"># 本轮还可以计算多少 prefill token。</span>
+            <span class="tok-keyword">if</span> remaining == <span class="tok-number">0</span>:
+                <span class="tok-keyword">break</span>
+            <span class="tok-comment"># If: 减去的是前缀缓存命中（来自其他请求的共享前缀）。</span>
+            <span class="tok-comment"># Else: 减去的是本请求已计算部分；其中已包含共享前缀和 chunked prefill 的进度。</span>
+            <span class="tok-keyword">if</span> <span class="tok-keyword">not</span> seq.block_table:     <span class="tok-comment"># 没有块表意味着这是第一次为它分配 KV 块，或者抢占后块表被清空。</span>
+                num_cached_blocks = self.block_manager.can_allocate(seq)   <span class="tok-comment"># 查询可复用前缀块数，并同时确认块数是否足够；返回 -1 表示当前不能分配。</span>
+                <span class="tok-keyword">if</span> num_cached_blocks == -<span class="tok-number">1</span>:
+                    <span class="tok-keyword">break</span>
+                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size    <span class="tok-comment"># 第一次分配时，待计算 token 数等于当前序列长度减去已命中的完整前缀块长度。</span>
+            <span class="tok-keyword">else</span>:          <span class="tok-comment"># 已有块表表示某个分块 prefill 尚未完成；待计算量改为当前序列总长度减去已算好的 token 数。</span>
+                num_tokens = seq.num_tokens - seq.num_cached_tokens  <span class="tok-comment">#为什么else分支不去剪掉共享前缀？因为在 else 分支时，共享前缀已经被处理过了。（之前必然经历过if分支）</span>
+            <span class="tok-keyword">if</span> remaining &lt; num_tokens <span class="tok-keyword">and</span> scheduled_seqs:          <span class="tok-comment"># 当前请求放不进剩余 token 预算，且本轮已经安排过其他请求时，先停止。因此当前实现只允许本轮第一个请求使用不完整的 prefill chunk。</span>
+                <span class="tok-keyword">break</span>
+            <span class="tok-comment"># 关联共享前缀块的目的是实现 KV cache 复用，避免重复计算。</span>
+            <span class="tok-comment"># 假设块大小为 16，两请求分词后的前 32 个 token 完全相同，且各需 4 块：</span>
+            <span class="tok-comment"># 请求 A（已处理）: &quot;你是一个 helpful assistant。请帮我...&quot;</span>
+            <span class="tok-comment">#                  └────── 前 32 个 token ──────┘</span>
+            <span class="tok-comment">#                  已计算，KV cache 存储在块 [5, 6]。</span>
+            <span class="tok-comment"># 请求 B（新请求）: &quot;你是一个 helpful assistant。请翻译...&quot;</span>
+            <span class="tok-comment">#                  └────── 前 32 个 token ──────┘</span>
+            <span class="tok-comment"># 不关联的情况：</span>
+            <span class="tok-comment"># 请求 A 的块表：seq_A.block_table = [5, 6, 7, 8]</span>
+            <span class="tok-comment"># 请求 B 的块表：seq_B.block_table = [9, 10, 11, 12]</span>
+            <span class="tok-comment"># 请求 B 需要重新计算前 32 个 token 的 KV cache。</span>
+            <span class="tok-comment"># 关联后的情况：</span>
+            <span class="tok-comment"># 请求 A 的块表：seq_A.block_table = [5, 6, 7, 8]</span>
+            <span class="tok-comment"># 请求 B 的块表：seq_B.block_table = [5, 6, 11, 12]</span>
+            <span class="tok-comment"># 请求 B 的前两个块复用 A 已计算的 KV cache。</span>
+            <span class="tok-keyword">if</span> <span class="tok-keyword">not</span> seq.block_table:        <span class="tok-comment"># 仅在没有块表时执行真实的块编号分配与前缀块关联。已分块处理过的请求继续使用原块表。</span>
+                self.block_manager.allocate(seq, num_cached_blocks)
+            seq.num_scheduled_tokens = min(num_tokens, remaining)
+            num_batched_tokens += seq.num_scheduled_tokens  <span class="tok-comment"># 一个批次包含一次运算一起要进行的token数num_batched_tokens；一个批次为了提高计算效率，会把多个请求的序列一起计算，这一个请求的token就是scheduledtokens</span>
+            <span class="tok-keyword">if</span> seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:   <span class="tok-comment"># 若已缓存进度加本轮计划量等于当前序列长度，说明完整 prompt 已被安排在本轮算完。</span>
+                seq.status = SequenceStatus.RUNNING     <span class="tok-comment"># 把请求标成运行中。这个状态变化发生在本轮模型计算之前</span>
+                self.waiting.popleft()     <span class="tok-comment"># 从 waiting 队头移除，并追加到 running 队尾。</span>
+                self.running.append(seq)
+            scheduled_seqs.append(seq)<span class="tok-comment"># 无论 prompt 本轮是否算完，只要安排了一个 chunk，就加入本轮执行列表。</span>
+
+        <span class="tok-keyword">if</span> scheduled_seqs:
+            <span class="tok-keyword">return</span> scheduled_seqs, <span class="tok-constant">True</span>
+
+        <span class="tok-comment"># 只有没有 prefill 请求被选中时，控制流才到这里。</span>
+        <span class="tok-comment"># decode</span>
+        <span class="tok-comment"># 从运行队列选请求，最多选 max_num_seqs 个。</span>
+        <span class="tok-comment"># A 若需要新块而空闲池为零，等待 B、C、D 自然结束可能使 A 长时间无响应。</span>
+        <span class="tok-comment"># 抢占会产生重新进入 prefill 等开销，但能先让队头请求继续运行。</span>
+        <span class="tok-keyword">while</span> self.running <span class="tok-keyword">and</span> <span class="tok-builtin">len</span>(scheduled_seqs) &lt; self.max_num_seqs:
+            seq = self.running.popleft() <span class="tok-comment"># deque.popleft() 从队头取出请求；deque.pop() 从队尾取出请求，两者都能高效地操作队列两端。</span>
+            <span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
+                <span class="tok-keyword">if</span> self.running:
+                    self.preempt(self.running.pop()) <span class="tok-comment">#抢占：腾出显存资源，让其他请求能继续运行</span>
+                <span class="tok-keyword">else</span>:
+                    self.preempt(seq)
+                    <span class="tok-keyword">break</span>
+            <span class="tok-keyword">else</span>:
+                seq.num_scheduled_tokens = <span class="tok-number">1</span>      <span class="tok-comment"># Decode 对这个请求每轮计算一个 token。</span>
+                seq.is_prefill = <span class="tok-constant">False</span>             <span class="tok-comment"># 标记它进入 decode 输入准备路径，也影响多卡传输时只发送最后一个 token。</span>
+                self.block_manager.may_append(seq)   <span class="tok-comment"># 如跨过块边界，正式给请求追加一个物理 KV 块。</span>
+                scheduled_seqs.append(seq)   <span class="tok-comment"># 将当前请求放进本轮 decode batch。</span>
+        <span class="tok-keyword">assert</span> scheduled_seqs             <span class="tok-comment"># 要求本轮最终至少有一个请求可执行；</span>
+        self.running.extendleft(reversed(scheduled_seqs))<span class="tok-comment"># 把选中的请求按原顺序放回运行队列左端，等待模型执行和后处理；反转是为了抵消 extendleft 逐个插入时的顺序变化。</span>
+        <span class="tok-keyword">return</span> scheduled_seqs, <span class="tok-constant">False</span>
+    <span class="tok-keyword">def</span> preempt(self, seq: Sequence):         <span class="tok-comment"># 定义抢占：把请求从当前运行条件撤回。调用者负责从 running 中取出它。</span>
+        seq.status = SequenceStatus.WAITING
+        seq.is_prefill = <span class="tok-constant">True</span>           <span class="tok-comment"># 下次调度需走 prefill 恢复路径；若之前的 KV 块可通过前缀缓存命中，可减少重算。</span>
+        self.block_manager.deallocate(seq)    <span class="tok-comment"># 释放该请求对 KV 块的引用并清空块表、缓存进度。</span>
+        self.waiting.appendleft(seq)   <span class="tok-comment"># 抢占请求放在等待队列前端，比普通新请求更早再次尝试。</span>
+
+    <span class="tok-keyword">def</span> postprocess(self, seqs: <span class="tok-builtin">list</span>[Sequence], token_ids: <span class="tok-builtin">list</span>[<span class="tok-builtin">int</span>], is_prefill: <span class="tok-builtin">bool</span>):<span class="tok-comment"># postprocess() 接收本轮请求列表、模型为它们采样的 token ID 列表和本轮路径标记。</span>
+        <span class="tok-keyword">for</span> seq, token_id <span class="tok-keyword">in</span> <span class="tok-builtin">zip</span>(seqs, token_ids):
+            self.block_manager.hash_blocks(seq)            <span class="tok-comment"># 给本轮刚算完的完整 KV 块登记内容哈希，使后续请求有机会复用。</span>
+            seq.num_cached_tokens += seq.num_scheduled_tokens     <span class="tok-comment"># 将本轮已完成的模型计算计入缓存进度。</span>
+            seq.num_scheduled_tokens = <span class="tok-number">0</span>             <span class="tok-comment"># 清除本轮计划量，下一轮由 schedule() 重新设置。</span>
+            <span class="tok-keyword">if</span> is_prefill <span class="tok-keyword">and</span> seq.num_cached_tokens &lt; seq.num_tokens:    <span class="tok-comment">#  意思是prefill还没完全看完，第一个token都没有生成。如果本轮只是长 prompt 的中间 chunk，就忽略此次采样 token；prompt 尚未完整，不能把它当成真正的生成结果。</span>
+                <span class="tok-keyword">continue</span>
+            seq.append_token(token_id)                      <span class="tok-comment"># 对完整 prefill 或 decode，把采样 token 追加到序列末尾，更新总长度和 last_token。这个新 token 的 KV 要在下一轮 decode 才计算。</span>
+            <span class="tok-keyword">if</span> (<span class="tok-keyword">not</span> seq.ignore_eos <span class="tok-keyword">and</span> token_id == self.eos) <span class="tok-keyword">or</span> seq.num_completion_tokens == seq.max_tokens: <span class="tok-comment"># ignore_eos=False 且采样到 EOS，或已生成数恰好达到 max_tokens 时，结束请求。</span>
+                seq.status = SequenceStatus.FINISHED
+                self.block_manager.deallocate(seq)
+                self.running.remove(seq)</code></pre></figure>
+<section id="section-1"><h3>KV 块不足时的抢占</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
+    <span class="tok-keyword">if</span> self.running:
+        self.preempt(self.running.pop())
+    <span class="tok-keyword">else</span>:
+        self.preempt(seq)
+        <span class="tok-keyword">break</span></code></pre></figure>
+<p><a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>Scheduler.schedule()</code></a> 在 decode 分支从 <code>running</code> 中选择请求。这些请求已经完成 prompt 处理，正在逐个生成新 token。生成时，模型要把新 token 的 Key 和 Value 写入 KV Cache。<code>BlockManager.can_append(seq)</code> 检查当前请求在下一步是否需要一个新的物理 KV 块，以及空闲块是否足够。它的条件是 <code>len(seq) % block_size == 1</code>：只有刚跨过块边界才需要新块；若当前块还有位置，即使空闲池为空，这一步也能继续。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>can_append()</code> 源码</a></p>
+<p>假设 <code>running</code> 依次是 A、B、C、D，A 正好需要新块，但空闲块为零。只等待 B、C、D 自然生成到结束，A 的下一步可能要等很久；当它们的输出很长，或系统持续有请求占用块时，A 会长时间没有响应。B、C、D 如果还能继续生成并最终结束，这个例子属于<strong>资源等待造成的请求饥饿或长尾延迟</strong>；如果多个请求都在块边界等新块，则可能出现无人能推进的资源停滞。代码因此把队尾 D 抢占，解除 D 对块的引用，再检查 A；还不够就继续从队尾撤回请求。它优先让队头请求取得资源，并没有保证每个请求都能立即前进。</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">def</span> preempt(self, seq: Sequence):
+    seq.status = SequenceStatus.WAITING
+    seq.is_prefill = <span class="tok-constant">True</span>
+    self.block_manager.deallocate(seq)
+    self.waiting.appendleft(seq)</code></pre></figure>
+<p>抢占的代价从这四行可以看出：D 离开运行队列，块表与 <code>num_cached_tokens</code> 被清空，下次从等待队列重新走 prefill。<code>BlockManager.deallocate()</code> 解除 D 对块的引用；若某个块还被其他请求共享，它的引用计数不会降到零，因此这次抢占也未必马上腾出一个空闲块。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>deallocate()</code> 源码</a> 释放后的完整块若仍在哈希索引中，D 恢复时可能再次命中；如果块已被重新分配给不同内容，相应 token 就要重新计算。抢占用额外的状态切换与可能的重算，换取队头请求及时继续执行。</p>
+<p>如果其他运行请求都已撤回，当前请求仍拿不到块，<code>else</code> 会连当前请求也抢占。这份实现随后要求 <code>scheduled_seqs</code> 非空；若本轮一个请求都没选中，<code>assert scheduled_seqs</code> 会报错。因此，这段逻辑解决的是常见的资源竞争，不能把它理解为对所有块容量配置都能完成请求的保证。</p>
+</section>
+<section id="section-2"><h3>共享前缀与分块 prefill 的剩余计算量</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">if</span> remaining == <span class="tok-number">0</span>:
+    <span class="tok-keyword">break</span>
+<span class="tok-keyword">if</span> <span class="tok-keyword">not</span> seq.block_table:
+    num_cached_blocks = self.block_manager.can_allocate(seq)
+    <span class="tok-keyword">if</span> num_cached_blocks == -<span class="tok-number">1</span>:
+        <span class="tok-keyword">break</span>
+    num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
+<span class="tok-keyword">else</span>:
+    num_tokens = seq.num_tokens - seq.num_cached_tokens
+<span class="tok-keyword">if</span> remaining &lt; num_tokens <span class="tok-keyword">and</span> scheduled_seqs:
+    <span class="tok-keyword">break</span>
+<span class="tok-keyword">if</span> <span class="tok-keyword">not</span> seq.block_table:
+    self.block_manager.allocate(seq, num_cached_blocks)
+seq.num_scheduled_tokens = min(num_tokens, remaining)</code></pre></figure>
+<p><code>remaining</code> 是本轮还能计算的 token 数；<code>num_tokens</code> 是当前请求<strong>还需要</strong>计算的 token 数。两者分开，才能决定这轮是否放得下当前请求。<code>block_table</code> 保存这个请求按顺序使用的物理 KV 块编号。它为空时，说明还没有为当前执行阶段建立块映射：新请求会如此；被抢占后，<code>deallocate()</code> 清空块表，也会重新进入这条分支。</p>
+<p>第一次分配时，<code>can_allocate(seq)</code> 按 token 内容和前缀哈希查找连续、完整、已经算过的 KV 块，并同时检查块容量。返回的 <code>num_cached_blocks</code> 是<strong>块数</strong>，乘上 <code>block_size</code> 才是可以跳过计算的 token 数。真正将这些共享块编号写进 <code>seq.block_table</code> 的是后面的 <code>allocate(seq, num_cached_blocks)</code>；它还会设置 <code>seq.num_cached_tokens = num_cached_blocks * block_size</code>。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>can_allocate()</code> 与 <code>allocate()</code> 源码</a></p>
+<p>例如，设每块容纳 16 个 token，请求 A 和 B 分词后的前 32 个 token 完全相同，后面的 token 不同，且两者各需 4 块。A 已算好前缀并使用 <code>[5, 6, 7, 8]</code>。B 第一次进入时可命中前两块，于是它的块表可以是 <code>[5, 6, 11, 12]</code>：<code>5</code>、<code>6</code> 保存两者共用的前缀 KV，<code>11</code>、<code>12</code> 留给 B 的不同部分。若 B 总长 64 个 token，<code>num_cached_blocks = 2</code>，这一分支得到 <code>num_tokens = 64 - 2 × 16 = 32</code>。这些编号是解释性示例，实际编号由空闲块池决定；复用要求 token ID 按块连续一致，文本看起来相似并不足够。</p>
+<p>如果 B 的 32 个待计算 token 本轮只得到 20 个预算，<code>seq.num_scheduled_tokens</code> 就是 20。模型处理完后，<code>postprocess()</code> 把 20 加到 <code>num_cached_tokens</code>，此时它是 52。B 的 <code>block_table</code> 仍在；下一轮进入 <code>else</code>，计算 <code>64 - 52 = 12</code>。这里无需再减一次 32 个共享前缀 token，因为 <code>num_cached_tokens</code> 已经把复用的 32 和新算好的 20 都记入进度。抢占会清空块表和进度；恢复时重新走 <code>if</code>，再次查询仍可用的共享前缀。</p>
+<p><code>if remaining &lt; num_tokens and scheduled_seqs</code> 规定：本轮已经选了其他请求，当前请求又放不进剩余预算，就先停下。只有本轮第一个被选中的请求可以使用不完整的 prefill chunk。这个条件使一次 prefill batch 不会同时放入多个仅处理了部分 prompt 的请求。</p>
+</section>
+<section id="section-3"><h3>运行队列为何先取出再放回</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">while</span> self.running <span class="tok-keyword">and</span> <span class="tok-builtin">len</span>(scheduled_seqs) &lt; self.max_num_seqs:
+    seq = self.running.popleft()
+    <span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
+        <span class="tok-keyword">if</span> self.running:
+            self.preempt(self.running.pop())
+        <span class="tok-keyword">else</span>:
+            self.preempt(seq)
+            <span class="tok-keyword">break</span>
+    <span class="tok-keyword">else</span>:
+        seq.num_scheduled_tokens = <span class="tok-number">1</span>
+        seq.is_prefill = <span class="tok-constant">False</span>
+        self.block_manager.may_append(seq)
+        scheduled_seqs.append(seq)
+<span class="tok-keyword">assert</span> scheduled_seqs
+self.running.extendleft(reversed(scheduled_seqs))
+<span class="tok-keyword">return</span> scheduled_seqs, <span class="tok-constant">False</span></code></pre></figure>
+<p><code>popleft()</code> 从队头取出准备调度的请求，体现这里优先考虑较早进入 <code>running</code> 的请求。<code>pop()</code> 同样是 <code>deque</code> 的高效两端操作；代码用它从队尾挑选被抢占者，保留队头的优先权。先把当前请求取出还有一个作用：资源不足时，<code>self.running.pop()</code> 取到的是<strong>其他</strong>运行请求，不会误把当前正在争取资源的请求当作第一个牺牲对象。</p>
+<p>取出不代表运行请求已经完成。选中请求仍需留在 <code>running</code>，因为模型执行后 <code>postprocess()</code> 可能调用 <code>self.running.remove(seq)</code> 移除已结束的请求。<code>scheduled_seqs</code> 是本轮交给模型计算的列表；<code>running</code> 则保存跨轮次继续生成的请求。调度完成后，<code>extendleft(reversed(scheduled_seqs))</code> 把选中的请求放回运行队头。</p>
+<p>设 <code>running = [A, B, C]</code>，本轮最多选两个请求，三者都不需要抢占。<code>popleft()</code> 先后取出 A、B，队列暂时是 <code>[C]</code>，<code>scheduled_seqs = [A, B]</code>。<code>extendleft()</code> 会逐个从左侧插入，所以先把列表反转为 <code>[B, A]</code>，插入 B 再插入 A，最终恢复为 <code>[A, B, C]</code>。这也说明它不是把 A、B 轮换到队尾：本实现会让已选中的队头请求保持靠前，直到结束、被抢占，或受到其他调度条件限制。</p>
+</section>
+            <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
+<a href="03-sequence.html">上一章：sequence.py</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

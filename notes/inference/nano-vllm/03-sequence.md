@@ -130,11 +130,45 @@ class Sequence:
 
 ## 文件职责与对象边界
 
-上面是 [Nano-vLLM 提交 `bb823b3` 的完整 `sequence.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)，原有可执行语句保持一致，中文注释解释字段值和每个方法的实际动作。`Sequence` 在这里代表**一个生成请求**，不是模型的一层，也不只是普通 token 列表。一个 prompt 经 `LLMEngine.add_request()` 转成 token ID 后，会建立一个 `Sequence`，再放进调度器的等待队列。[`add_request()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py)
+```python
+def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
+    if isinstance(prompt, str):
+        prompt = self.tokenizer.encode(prompt)
+    seq = Sequence(prompt, sampling_params)
+    self.scheduler.add(seq)
+```
+
+这段调用代码位于 [`llm_engine.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py)：一个 prompt 转成 token ID 后，会建立一个 `Sequence`，再放进调度器的等待队列。`Sequence` 保存的是**一个生成请求**的状态。
 
 对象内部同时保存三类信息：请求的 token（原 prompt 与后来采样的输出）、请求处在等待/运行/完成哪个状态，以及它已计算的 token 数和物理 KV 块映射。这样调度器传递一个 `Sequence`，就能获得本轮调度所需的请求状态，而不必把这些数据拆成多个互不关联的列表。
 
 ## 状态、编号与构造参数
+
+```python
+class SequenceStatus(Enum):
+    WAITING = auto()
+    RUNNING = auto()
+    FINISHED = auto()
+
+class Sequence:
+    block_size = 256
+    counter = count()
+
+    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+        self.seq_id = next(Sequence.counter)
+        self.status = SequenceStatus.WAITING
+        self.token_ids = copy(token_ids)
+        self.last_token = token_ids[-1]
+        self.num_tokens = len(self.token_ids)
+        self.num_prompt_tokens = len(token_ids)
+        self.num_cached_tokens = 0
+        self.num_scheduled_tokens = 0
+        self.is_prefill = True
+        self.block_table = []
+        self.temperature = sampling_params.temperature
+        self.max_tokens = sampling_params.max_tokens
+        self.ignore_eos = sampling_params.ignore_eos
+```
 
 `SequenceStatus` 用 `Enum` 定义 `WAITING`、`RUNNING`、`FINISHED` 三种状态；`auto()` 自动给它们分配枚举值，业务代码应比较成员名而不是依赖数值。`Sequence.counter = count()` 是类级递增计数器；每次 `Sequence.__init__()` 调用 `next(Sequence.counter)`，就得到一个新的 `seq_id`。[`ModelRunner.warmup_model()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py) 也会创建临时 `Sequence`，所以正式请求的首个 ID 不保证为 0，但其相对创建顺序仍可用于恢复输出顺序。
 
@@ -143,6 +177,29 @@ class Sequence:
 `block_size` 是类属性，默认 256；创建引擎时 [`LLMEngine.__init__()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py) 会将它设置为 `config.kvcache_block_size`。这个值只用于请求自身计算逻辑块边界；真实 GPU KV 张量由 `ModelRunner` 分配，物理块编号由 `BlockManager` 管理。
 
 ## 三个 token 计数与生成边界
+
+```python
+@property
+def num_completion_tokens(self):
+    return self.num_tokens - self.num_prompt_tokens
+
+@property
+def prompt_token_ids(self):
+    return self.token_ids[:self.num_prompt_tokens]
+
+@property
+def completion_token_ids(self):
+    return self.token_ids[self.num_prompt_tokens:]
+```
+
+`append_token()` 位于这些属性之后；它把新采样的 token 加入同一个列表，并更新长度。
+
+```python
+def append_token(self, token_id: int):
+    self.token_ids.append(token_id)
+    self.last_token = token_id
+    self.num_tokens += 1
+```
 
 `num_tokens` 初始化为 prompt 长度，此后每调用一次 `append_token()` 加 1。`num_prompt_tokens` 固定为最初的 prompt 长度，于是 `num_completion_tokens = num_tokens - num_prompt_tokens` 给出已采样的输出个数；两个切片属性也以它为边界，分别返回原 prompt 和生成部分。
 
@@ -156,6 +213,28 @@ class Sequence:
 
 ## 块数、块切片与调度器接口
 
+```python
+def __len__(self):
+    return self.num_tokens
+
+def __getitem__(self, key):
+    return self.token_ids[key]
+```
+
+```python
+@property
+def num_blocks(self):
+    return (self.num_tokens + self.block_size - 1) // self.block_size
+
+@property
+def last_block_num_tokens(self):
+    return self.num_tokens - (self.num_blocks - 1) * self.block_size
+
+def block(self, i):
+    assert 0 <= i < self.num_blocks
+    return self.token_ids[i*self.block_size: (i+1)*self.block_size]
+```
+
 `num_blocks` 用 `(num_tokens + block_size - 1) // block_size` 对块数向上取整。若块大小为 256，长度 256 需要 1 个块，长度 257 需要 2 个块。`last_block_num_tokens` 给出最后一个逻辑块中当前有多少 token；上述长度 257 的例子里，它等于 1。`block(i)` 返回第 `i` 个**逻辑块中的 token ID 切片**，因此 `BlockManager` 能按整块内容计算前缀哈希。[`BlockManager.can_allocate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
 
 `block_table` 则不是 token 内容：它按逻辑顺序存放物理 KV 块编号。例如逻辑块 `0、1、2` 可能映射为物理块 `[7,3,11]`。`Scheduler` 让 `BlockManager.allocate()` 填写这个列表；`ModelRunner.prepare_block_tables()` 再把多个请求的块表整理成 GPU 可读张量。这个例子是解释性构造，真实编号取决于当时的空闲池。[`prepare_block_tables()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py)
@@ -164,10 +243,21 @@ class Sequence:
 
 ## 跨进程状态传递
 
+```python
+def __getstate__(self):
+    last_state = self.last_token if not self.is_prefill else self.token_ids
+    return (self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state)
+
+def __setstate__(self, state):
+    self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state
+    if isinstance(last_state, list):
+        self.token_ids = last_state
+        self.last_token = self.token_ids[-1]
+    else:
+        self.token_ids = []
+        self.last_token = last_state
+```
+
 `__getstate__()` 与 `__setstate__()` 控制 `Sequence` 经 Python 序列化时传递哪些字段。多卡执行中，rank 0 通过共享内存把选中的请求交给其他 worker；prefill 需要完整的当前输入 token 列表，所以 `__getstate__()` 传 `self.token_ids`。decode 每个请求只计算上次采样出的 `last_token`，于是传这个整数，减少控制数据量。[`ModelRunner.write_shm()` 与 `read_shm()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py)
 
 `__setstate__()` 按固定元组顺序恢复长度、缓存进度、块表和最后状态。若最后一项是列表，就恢复 `token_ids` 并从末尾取 `last_token`；若是整数，就只保存该 `last_token`，把 worker 本地 `token_ids` 置为空列表。这里恢复的是执行器当前计算所需的字段，不是把主进程中的完整请求对象原样复制一份。
-
-## 手敲代码的核对位置
-
-上面的完整代码刻意保留了原版中的 `self.num_tokens = len(self.token_ids)`、`self.num_scheduled_tokens` 和 `self.last_token = last_state`。它们分别决定长度相关属性是否可用、跨进程恢复后调度量的字段名是否一致，以及 decode worker 能否取得正确输入。手敲版若漏掉初始化或拼错名称，文件可能仍能通过 Python 语法检查，却会在第一次访问该字段时出错。核对时应先比较这三处，再用短 token 列表手算 `num_blocks` 与输出切片。

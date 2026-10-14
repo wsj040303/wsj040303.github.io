@@ -37,6 +37,61 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+const pythonKeywords = new Set([
+  "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
+  "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
+  "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+  "with", "yield",
+]);
+const pythonBuiltins = new Set(["bool", "dict", "int", "isinstance", "len", "list", "next", "range", "str", "sum", "zip"]);
+
+function highlightPython(escapedCode) {
+  const code = escapedCode.replace(/&(?:amp|lt|gt|quot|#39|#x27);/g, (entity) => ({
+    "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&#x27;": "'",
+  })[entity]);
+  const span = (kind, value) => '<span class="tok-' + kind + '">' + escapeHtml(value) + '</span>';
+  let result = "";
+  let i = 0;
+  while (i < code.length) {
+    const start = i;
+    const char = code[i];
+    if (char === "#") {
+      while (i < code.length && code[i] !== "\n") i++;
+      result += span("comment", code.slice(start, i));
+    } else if (char === '"' || char === "'") {
+      const quote = code.startsWith(char.repeat(3), i) ? char.repeat(3) : char;
+      i += quote.length;
+      while (i < code.length) {
+        if (code[i] === "\\") {
+          i += Math.min(2, code.length - i);
+        } else if (code.startsWith(quote, i)) {
+          i += quote.length;
+          break;
+        } else {
+          i++;
+        }
+      }
+      result += span("string", code.slice(start, i));
+    } else if (/[A-Za-z_]/.test(char)) {
+      i++;
+      while (i < code.length && /[A-Za-z_0-9]/.test(code[i])) i++;
+      const word = code.slice(start, i);
+      const kind = pythonKeywords.has(word) ? "keyword" :
+        ["True", "False", "None"].includes(word) ? "constant" :
+          pythonBuiltins.has(word) ? "builtin" : "";
+      result += kind ? span(kind, word) : escapeHtml(word);
+    } else if (/[0-9]/.test(char)) {
+      i++;
+      while (i < code.length && /[0-9_.]/.test(code[i])) i++;
+      result += span("number", code.slice(start, i));
+    } else {
+      result += escapeHtml(char);
+      i++;
+    }
+  }
+  return result;
+}
+
 function renderMarkdown(input, sourceFile = "") {
   const prepared = input.trim();
   if (!prepared) return "";
@@ -50,7 +105,7 @@ function renderMarkdown(input, sourceFile = "") {
       const caption = complete ? "完整代码 · " + sourceFile : "代码片段";
       return '<figure class="' + className + '"><figcaption>' + escapeHtml(caption) + ' <span>' +
         escapeHtml(label) + '</span></figcaption><pre><code>' +
-        content.trimEnd() + '</code></pre></figure>';
+        (language === "python" ? highlightPython(content.trimEnd()) : content.trimEnd()) + '</code></pre></figure>';
     });
   html = html.replaceAll("<table>", '<div class="table-scroll"><table>')
     .replaceAll("</table>", "</table></div>");
@@ -114,7 +169,7 @@ function renderChapter(chapter) {
     '    <title>' + escapeHtml(title) + ' · WSJ</title>',
     '    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">',
     '    <link rel="stylesheet" href="../../../assets/garden.css">',
-    '    <link rel="stylesheet" href="../../../assets/inference.css">',
+    '    <link rel="stylesheet" href="../../../assets/inference.css?v=20261014-python">',
     '    <script src="../../../assets/site.js" defer></script>',
     '  </head>',
     '  <body>',

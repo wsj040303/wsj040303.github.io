@@ -33,7 +33,7 @@ class LLMEngine:
     def __init__(self, model, **kwargs):
         # 用集合收集 Config 的字段名；只允许这些名字成为配置参数。
         config_fields = {field.name for field in fields(Config)}
-        # 从 kwargs 中挑出合法配置字段。其余传入参数会被忽略，而不是立刻报错；手敲时可先保留行为，再考虑是否改成显式报错。
+        # 从 kwargs 中挑出 Config 认识的参数；其他键会被忽略，不会触发报错。
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         # 构造配置对象，触发 Config.__post_init__() 检查本地模型路径与读取模型配置。
         config = Config(model, **config_kwargs)
@@ -157,7 +157,17 @@ class LLMEngine:
 
 ## 文件职责与调用边界
 
-上面是 [Nano-vLLM 提交 `bb823b3` 的完整 `llm_engine.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py)，保留原有可执行语句，并在语句旁补充中文注释。`LLMEngine` 负责把配置、分词器、调度器和模型执行器放到同一个运行循环中；具体的请求选择在 `Scheduler`，模型前向计算在 `ModelRunner`。对外的 `LLM` 类只继承它，没有再实现一套生成逻辑。[`LLM` 源码](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/llm.py)
+```python
+def step(self):
+    seqs, is_prefill = self.scheduler.schedule()
+    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+    token_ids = self.model_runner.call("run", seqs, is_prefill)
+    self.scheduler.postprocess(seqs, token_ids, is_prefill)
+    outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+    return outputs, num_tokens
+```
+
+`LLMEngine` 接收请求、调用调度器选择本轮请求，再让模型执行器计算并交回结果。`add_request()` 把一个请求放进队列；`step()` 执行一轮。这两个方法只负责连接组件：具体的请求选择在 `Scheduler`，模型前向计算在 `ModelRunner`。对外的 [`LLM` 类](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/llm.py) 直接继承 `LLMEngine`。
 
 ![llm_engine.py 的两条控制路径：初始化时依次创建配置、模型执行器、分词器和调度器；生成时先入队，再循环执行 schedule、run 和 postprocess，最后整理输出。](images/llm-engine-flow.svg)
 
@@ -167,6 +177,28 @@ class LLMEngine:
 
 ## 初始化顺序与配置回填
 
+```python
+def __init__(self, model, **kwargs):
+    config_fields = {field.name for field in fields(Config)}
+    config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
+    config = Config(model, **config_kwargs)
+    Sequence.block_size = config.kvcache_block_size
+    self.ps = []
+    self.events = []
+    ctx = mp.get_context("spawn")
+    for i in range(1, config.tensor_parallel_size):
+        event = ctx.Event()
+        process = ctx.Process(target=ModelRunner, args=(config, i, event))
+        process.start()
+        self.ps.append(process)
+        self.events.append(event)
+    self.model_runner = ModelRunner(config, 0, self.events)
+    self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
+    config.eos = self.tokenizer.eos_token_id
+    self.scheduler = Scheduler(config)
+    atexit.register(self.exit)
+```
+
 `__init__(model, **kwargs)` 中，`model` 是本地模型目录；`kwargs` 中只有字段名属于 [`Config`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/config.py) 的项会进入 `config_kwargs`。Python 的 `**config_kwargs` 把字典里的键值展开成命名参数；拼错的配置名会被此处过滤，当前实现不会为它报错。
 
 接下来先创建 `ModelRunner(config, 0, self.events)`。它加载 Qwen3 权重、预热模型并根据显存计算 `config.num_kvcache_blocks`。然后 `AutoTokenizer.from_pretrained(config.model, use_fast=True)` 从同一个模型目录读取分词器，把 `eos_token_id` 写回 `config.eos`。最后才创建 `Scheduler(config)`，此时调度器才能取得真实的 KV 块数和结束 token ID。这里的“同一个目录”是调用 `LLM` 时传入的模型目录，里面的权重与 tokenizer 必须配套。[`ModelRunner` 初始化源码](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py)
@@ -175,11 +207,38 @@ class LLMEngine:
 
 ## 张量并行中的主进程和子进程
 
+```python
+ctx = mp.get_context("spawn")
+for i in range(1, config.tensor_parallel_size):
+    event = ctx.Event()
+    process = ctx.Process(target=ModelRunner, args=(config, i, event))
+    process.start()
+    self.ps.append(process)
+    self.events.append(event)
+self.model_runner = ModelRunner(config, 0, self.events)
+```
+
 `rank` 是本次张量并行计算中各进程的编号。当前进程直接构造 rank 0 的 `ModelRunner`；循环 `range(1, config.tensor_parallel_size)` 只为 rank 1 及之后创建子进程。`mp.get_context("spawn")` 返回使用 spawn 启动方式的上下文；`ctx.Process(...)` 只是创建进程对象，`process.start()` 才启动它。`Event` 是父进程通知对应 worker 处理命令的信号，不是模型输出。[`ModelRunner.call()` 与消息路径](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py)
 
 单卡 `tensor_parallel_size=1` 时，`range(1,1)` 为空，因此没有额外子进程，`self.events` 也为空。多卡时，每个 worker 在对应 GPU 上计算模型的一部分；rank 0 还在本进程中负责调用入口与采样结果的汇集。这说明循环从 1 开始的原因：rank 0 并没有缺席，它是在循环后单独创建的。
 
 ## 请求入队与一次 step
+
+```python
+def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
+    if isinstance(prompt, str):
+        prompt = self.tokenizer.encode(prompt)
+    seq = Sequence(prompt, sampling_params)
+    self.scheduler.add(seq)
+
+def step(self):
+    seqs, is_prefill = self.scheduler.schedule()
+    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+    token_ids = self.model_runner.call("run", seqs, is_prefill)
+    self.scheduler.postprocess(seqs, token_ids, is_prefill)
+    outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+    return outputs, num_tokens
+```
 
 `add_request(prompt, sampling_params)` 的输入是一个字符串或 token ID 列表，以及该请求的采样设置。字符串先用当前模型的 tokenizer 编码；列表已经是 token ID，直接使用。函数随后创建一个 [`Sequence`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)，通过 `scheduler.add(seq)` 放进 `waiting` 队列。**入队不等于模型已经计算**：实际计算要等 `step()` 调度到它。
 
@@ -193,6 +252,34 @@ class LLMEngine:
 
 ## generate 循环与结果顺序
 
+```python
+pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True, disable=not use_tqdm)
+if not isinstance(sampling_params, list):
+    sampling_params = [sampling_params] * len(prompts)
+for prompt, sp in zip(prompts, sampling_params):
+    self.add_request(prompt, sp)
+outputs = {}
+prefill_throughput = decode_throughput = 0.
+while not self.is_finished():
+    t = perf_counter()
+    output, num_tokens = self.step()
+    if num_tokens > 0:
+        prefill_throughput = num_tokens / (perf_counter() - t)
+    else:
+        decode_throughput = -num_tokens / (perf_counter() - t)
+    pbar.set_postfix({
+        "Prefill": f"{int(prefill_throughput)}tok/s",
+        "Decode": f"{int(decode_throughput)}tok/s",
+    })
+    for seq_id, token_ids in output:
+        outputs[seq_id] = token_ids
+        pbar.update(1)
+pbar.close()
+outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
+outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
+return outputs
+```
+
 `generate(prompts, sampling_params)` 接受一组 prompt。如果 `sampling_params` 只有一个对象，就用 `[sampling_params] * len(prompts)` 为每个 prompt 配上同一组参数。之后 `zip(prompts, sampling_params)` 按位置给出一对 `(prompt, sp)`，循环中调用 `add_request(prompt, sp)`。例如两个 prompt 与两组参数会形成两对；若传入的两个列表本来长度不同，`zip` 到较短的一方结束，当前代码没有另外检查剩余项。
 
 **所有请求在 `while not self.is_finished()` 开始前已经入队。** 循环每次调用一次 `step()`，用 `perf_counter()` 测这轮耗时，再利用 `num_tokens` 的符号分别显示 prefill 和 decode 的最近一轮速度。这些数字不是每个请求的首 token 延迟。完成请求先进入以 `seq_id` 为键的字典，最后按 `seq_id` 排序并由 tokenizer 解码，因此返回列表恢复了提交顺序。
@@ -200,6 +287,16 @@ class LLMEngine:
 源码的方法签名把返回类型标成 `list[str]`，实际返回项是包含 `text` 和 `token_ids` 的字典。阅读调用方时要按最后的返回语句判断真实数据结构。此处还有一个性能实验边界：现有 `generate()` 不会在请求到达的瞬间逐个流式返回 token；测在线请求的 TTFT，需要额外记录请求到达和首 token 事件。
 
 ## 与源码位置对应的两请求算例
+
+```python
+for prompt, sp in zip(prompts, sampling_params):
+    self.add_request(prompt, sp)
+outputs = {}
+prefill_throughput = decode_throughput = 0.
+while not self.is_finished():
+    t = perf_counter()
+    output, num_tokens = self.step()
+```
 
 以下例子用于核对 `generate()` 和 `step()` 的状态变化，并非性能实测。设两个短 prompt 都在 `generate()` 开头入队，`max_tokens=2`、`ignore_eos=True`，且一次 prefill 的 token 预算与 KV 块足够容纳两者。
 

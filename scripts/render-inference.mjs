@@ -185,7 +185,7 @@ function renderChapter(chapter) {
     '    <title>' + escapeHtml(title) + ' · WSJ</title>',
     '    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">',
     '    <link rel="stylesheet" href="../../../assets/garden.css">',
-    '    <link rel="stylesheet" href="../../../assets/inference.css?v=20261014-python">',
+    '    <link rel="stylesheet" href="../../../assets/inference.css?v=20261014-reader-layout">',
     '    <script src="../../../assets/site.js" defer></script>',
     '  </head>',
     '  <body>',

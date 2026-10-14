@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 389" role="img" aria-labelledby="title desc">
+<title id="title">运行队列顺序恢复</title>
+<desc id="desc">暂时取出 A B 后，运行队列剩 C。先反转选中请求为 B A，extendleft 先插 B 再插 A，恢复 A B C。</desc>
+<defs><marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.7"/></marker></defs>
+<rect x="8" y="8" width="1224" height="373" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="54" y="60" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="750" fill="#1b5136" text-anchor="start">为什么要 reversed 再 extendleft？</text>
+<text x="54" y="94" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">extendleft 每次都把元素插到最左边；插入顺序和最终顺序相反。</text>
+<rect x="38" y="128" width="270" height="191" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+<text x="54" y="167" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="start">① 取出 A、B 后</text>
+<text x="54" y="199" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="start">running = [C]</text>
+<rect x="56" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="86" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">C</text>
+<path d="M313 232 L332 232" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="338" y="128" width="270" height="191" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+<text x="354" y="167" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="start">② 反转待放回列表</text>
+<text x="354" y="199" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="start">[B, A]</text>
+<rect x="356" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="386" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">B</text>
+<rect x="432" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="462" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">A</text>
+<path d="M613 232 L632 232" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="638" y="128" width="270" height="191" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+<text x="654" y="167" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="start">③ 先放回 B</text>
+<text x="654" y="199" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="start">running = [B, C]</text>
+<rect x="656" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="686" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">B</text>
+<rect x="732" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="762" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">C</text>
+<path d="M913 232 L932 232" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="938" y="128" width="270" height="191" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+<text x="954" y="167" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="start">④ 再放回 A</text>
+<text x="954" y="199" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="start">running = [A, B, C]</text>
+<rect x="956" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="986" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">A</text>
+<rect x="1032" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="1062" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">B</text>
+<rect x="1108" y="224" width="60" height="48" rx="10" fill="#e6f2df" stroke="#a9c99d" stroke-width="1.5"/>
+<text x="1138" y="256" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">C</text>
+<text x="54" y="357" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="590" fill="#1b5136" text-anchor="start">scheduled_seqs = [A, B]；恢复后 running = [A, B, C]。</text>
+</svg>

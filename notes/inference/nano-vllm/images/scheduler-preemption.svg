@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 464" role="img" aria-labelledby="title desc">
+  <title id="title">KV 块不足时的抢占</title>
+  <desc id="desc">A 需要新块且空闲池为零。抢占独占块 8 的 D 后，A 获得块 8 继续生成，D 进入等待队列。</desc>
+  <defs><marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.7"/></marker></defs>
+  <rect x="8" y="8" width="1204" height="448" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="56" y="61" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="750" fill="#1b5136" text-anchor="start">A 缺 1 个新块，空闲池却为 0</text>
+  <text x="56" y="94" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">示例假设：块大小已到边界，D 独占块 8；这里只画出参与这次决策的块。</text>
+  <rect x="45" y="121" width="532" height="315" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+  <rect x="643" y="121" width="532" height="315" rx="14" fill="#f4f8ee" stroke="#bed5b7" stroke-width="2"/>
+  <text x="72" y="162" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="720" fill="#1b5136" text-anchor="start">抢占前</text>
+  <text x="670" y="162" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="720" fill="#1b5136" text-anchor="start">抢占 D 后</text>
+  <text x="72" y="207" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="start">running</text>
+  <text x="670" y="207" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="start">running</text>
+  <rect x="72" y="224" width="440" height="36" rx="7" fill="#faecd2" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="85" y="249" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">A [5] 需新块</text>
+  <rect x="72" y="268" width="440" height="36" rx="7" fill="#dcefd5" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="85" y="293" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">B [6]</text>
+  <rect x="72" y="312" width="440" height="36" rx="7" fill="#dcefd5" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="85" y="337" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">C [7]</text>
+  <rect x="72" y="356" width="440" height="36" rx="7" fill="#f6dddd" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="85" y="381" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">D [8]</text>
+  <rect x="670" y="224" width="440" height="36" rx="7" fill="#dcefd5" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="683" y="249" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">A [5, 8] 可继续</text>
+  <rect x="670" y="268" width="440" height="36" rx="7" fill="#dcefd5" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="683" y="293" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">B [6]</text>
+  <rect x="670" y="312" width="440" height="36" rx="7" fill="#dcefd5" stroke="#cbdcc4" stroke-width="1"/>
+  <text x="683" y="337" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#1b5136" text-anchor="start">C [7]</text>
+  <path d="M585 273 L630 273" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="607" y="248" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="700" fill="#1b5136" text-anchor="middle">抢占 D</text>
+  <text x="670" y="393" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="600" fill="#52705b" text-anchor="start">waiting: D；块 8 转给 A</text>
+  <text x="72" y="416" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="560" fill="#8e6343" text-anchor="start">空闲块 = 0；A 无法生成下一步</text>
+  <text x="670" y="416" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="560" fill="#52705b" text-anchor="start">D 稍后恢复，可能需要重新 prefill</text>
+</svg>

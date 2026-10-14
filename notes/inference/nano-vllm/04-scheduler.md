@@ -45,21 +45,6 @@ class Scheduler:
                 num_tokens = seq.num_tokens - seq.num_cached_tokens  #为什么else分支不去剪掉共享前缀？因为在 else 分支时，共享前缀已经被处理过了。（之前必然经历过if分支）
             if remaining < num_tokens and scheduled_seqs:          # 当前请求放不进剩余 token 预算，且本轮已经安排过其他请求时，先停止。因此当前实现只允许本轮第一个请求使用不完整的 prefill chunk。
                 break
-            # 关联共享前缀块的目的是实现 KV cache 复用，避免重复计算。
-            # 假设块大小为 16，两请求分词后的前 32 个 token 完全相同，且各需 4 块：
-            # 请求 A（已处理）: "你是一个 helpful assistant。请帮我..."
-            #                  └────── 前 32 个 token ──────┘
-            #                  已计算，KV cache 存储在块 [5, 6]。
-            # 请求 B（新请求）: "你是一个 helpful assistant。请翻译..."
-            #                  └────── 前 32 个 token ──────┘
-            # 不关联的情况：
-            # 请求 A 的块表：seq_A.block_table = [5, 6, 7, 8]
-            # 请求 B 的块表：seq_B.block_table = [9, 10, 11, 12]
-            # 请求 B 需要重新计算前 32 个 token 的 KV cache。
-            # 关联后的情况：
-            # 请求 A 的块表：seq_A.block_table = [5, 6, 7, 8]
-            # 请求 B 的块表：seq_B.block_table = [5, 6, 11, 12]
-            # 请求 B 的前两个块复用 A 已计算的 KV cache。
             if not seq.block_table:        # 仅在没有块表时执行真实的块编号分配与前缀块关联。已分块处理过的请求继续使用原块表。
                 self.block_manager.allocate(seq, num_cached_blocks)
             seq.num_scheduled_tokens = min(num_tokens, remaining)
@@ -76,8 +61,6 @@ class Scheduler:
         # 只有没有 prefill 请求被选中时，控制流才到这里。
         # decode
         # 从运行队列选请求，最多选 max_num_seqs 个。
-        # A 若需要新块而空闲池为零，等待 B、C、D 自然结束可能使 A 长时间无响应。
-        # 抢占会产生重新进入 prefill 等开销，但能先让队头请求继续运行。
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft() # deque.popleft() 从队头取出请求；deque.pop() 从队尾取出请求，两者都能高效地操作队列两端。
             while not self.block_manager.can_append(seq):
@@ -114,7 +97,44 @@ class Scheduler:
                 self.running.remove(seq)
 ```
 
-## KV 块不足时的抢占
+## 为什么 `if` 减去共享前缀，`else` 却减去 `num_cached_tokens`
+
+```python
+if not seq.block_table:
+    num_cached_blocks = self.block_manager.can_allocate(seq)
+    if num_cached_blocks == -1:
+        break
+    num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
+else:
+    num_tokens = seq.num_tokens - seq.num_cached_tokens
+```
+
+**这里要算的是同一个量：这个请求还有多少 token 需要送进模型。** 两个分支使用不同的减数，是因为它们进入时保存的进度不同。`block_table` 是请求使用的 KV 块编号表；它为空，表示这次还没有建立块映射。新请求第一次处理，以及被抢占后块表被清空，都会走 `if`。已有块表、但 prompt 尚未处理完的请求，下一轮继续 prefill 时走 `else`。
+
+![同一请求在首次分配和下一轮分块 prefill 中的 token 进度：64 个 token 中先复用前缀 32 个，再计算 20 个，最后剩余 12 个。](images/scheduler-prefill-counts.svg)
+
+在 `if` 中，`can_allocate(seq)` 查出可复用的**完整前缀块数**。例如另一个请求已经算好相同的前 32 个 token，每块 16 个 token，这里得到 `num_cached_blocks = 2`。当前请求总长 64，于是待计算量是 `64 - 2 × 16 = 32`。此时尚未执行下方的 `allocate()`，不能靠当前请求的 `num_cached_tokens` 得到这 32 个命中 token；代码直接使用查询结果。[`BlockManager.can_allocate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
+
+随后，`allocate(seq, num_cached_blocks)` 把共享前缀块关联到这个请求，并设置 `seq.num_cached_tokens = num_cached_blocks * block_size`。如果本轮又计算了 20 个 token，`postprocess()` 会执行 `seq.num_cached_tokens += seq.num_scheduled_tokens`，将进度从 32 更新到 52。下一轮块表已经存在，`else` 计算 `64 - 52 = 12`。**52 已经包含共享前缀 32 和本请求新算的 20**；再单独减一次前缀，就会重复扣除。[`BlockManager.allocate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)、[`Scheduler.postprocess()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py)
+
+图中的 token 数是解释性示例。图上方对应 `if`，下方对应 `else`：变化的是**已经计入进度的范围**，所以减数从“刚查到的前缀长度”变成了“累计已完成长度”。
+
+## 为什么先用 `popleft()` 把 A 从运行队列取出
+
+```python
+seq = self.running.popleft()
+while not self.block_manager.can_append(seq):
+    if self.running:
+        self.preempt(self.running.pop())
+```
+
+**疑问在于：A 明明还在生成，为什么先从 `running` 删除它？** 这里的删除是暂时取出一个候选请求，放到局部变量 `seq`，并非宣告 A 已结束。`popleft()` 取队头 A；资源不足时，`pop()` 从余下队列的尾部取抢占对象。两者都是 `deque` 的两端操作，选择不同端点是为了让当前候选 A 留在手里，让靠后的请求先让出资源。
+
+![运行队列从 A、B、C、D 变为 B、C、D：A 暂存在 seq 中，此后 pop 从队尾取出 D。](images/scheduler-queue-pick.svg)
+
+图中 `running` 原本是 `[A, B, C, D]`。执行 `popleft()` 后，`seq` 指向 A，队列只剩 `[B, C, D]`；此时 `pop()` 取出 D，不会误取正在等待块的 A。A 是否能计算，要等 `can_append(A)` 的检查结果；能计算时，它会进入本轮的 `scheduled_seqs`。
+
+## A 需要新 KV 块时，为什么抢占 D 而不是等它结束
 
 ```python
 while not self.block_manager.can_append(seq):
@@ -125,74 +145,31 @@ while not self.block_manager.can_append(seq):
         break
 ```
 
-[`Scheduler.schedule()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py) 在 decode 分支从 `running` 中选择请求。这些请求已经完成 prompt 处理，正在逐个生成新 token。生成时，模型要把新 token 的 Key 和 Value 写入 KV Cache。`BlockManager.can_append(seq)` 检查当前请求在下一步是否需要一个新的物理 KV 块，以及空闲块是否足够。它的条件是 `len(seq) % block_size == 1`：只有刚跨过块边界才需要新块；若当前块还有位置，即使空闲池为空，这一步也能继续。[`can_append()` 源码](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
+**问题的触发条件**是：A 的下一步需要一个新 KV 块，而空闲池里没有块。`can_append(A)` 只有在 `len(A) % block_size == 1` 时才要求空闲块；如果当前块还有空位，空闲池为零也能继续。下面的图假设 A 恰好跨过块边界，B、C、D 正占用其余块，D 的块没有被别人共享。[`BlockManager.can_append()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
 
-假设 `running` 依次是 A、B、C、D，A 正好需要新块，但空闲块为零。只等待 B、C、D 自然生成到结束，A 的下一步可能要等很久；当它们的输出很长，或系统持续有请求占用块时，A 会长时间没有响应。B、C、D 如果还能继续生成并最终结束，这个例子属于**资源等待造成的请求饥饿或长尾延迟**；如果多个请求都在块边界等新块，则可能出现无人能推进的资源停滞。代码因此把队尾 D 抢占，解除 D 对块的引用，再检查 A；还不够就继续从队尾撤回请求。它优先让队头请求取得资源，并没有保证每个请求都能立即前进。
+![A 需要一个新 KV 块但空闲池为零；抢占队尾 D 并释放其独占块后，A 获得该块，D 回到等待队列。](images/scheduler-preemption.svg)
+
+如果只让 A 等待 B、C、D 自然生成到结束，A 可能很久没有下一步输出。B、C、D 仍能生成时，这表现为 A 的长时间等待；如果它们也都需要新块且无人能释放块，计算就无法继续。代码优先抢占队尾 D：`preempt(D)` 使 D 回到 `waiting`，`deallocate(D)` 解除 D 对 KV 块的引用；若释放出空闲块，下一次 `can_append(A)` 就能通过。若 D 的块还被别的请求共享，抢占一次可能没有空闲块，所以这里用 `while` 继续检查和抢占。[`preempt()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py)、[`deallocate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
+
+抢占使 D 的块表和已缓存进度清零；D 下次要从 prefill 路径恢复。完整块若仍能从前缀缓存命中，可免去部分重算，否则会增加计算量。这里牺牲 D 的当前进度，换取 A 尽快继续生成。如果连 A 自己也只能被抢占，且本轮没有其他请求成功入选，后面的 `assert scheduled_seqs` 会报错；这份代码没有覆盖这种极端容量情况。
+
+## 选中 A、B 后，为什么又把它们放回 `running`
 
 ```python
-def preempt(self, seq: Sequence):
-    seq.status = SequenceStatus.WAITING
-    seq.is_prefill = True
-    self.block_manager.deallocate(seq)
-    self.waiting.appendleft(seq)
+seq.num_scheduled_tokens = 1
+seq.is_prefill = False
+self.block_manager.may_append(seq)
+scheduled_seqs.append(seq)
 ```
 
-抢占的代价从这四行可以看出：D 离开运行队列，块表与 `num_cached_tokens` 被清空，下次从等待队列重新走 prefill。`BlockManager.deallocate()` 解除 D 对块的引用；若某个块还被其他请求共享，它的引用计数不会降到零，因此这次抢占也未必马上腾出一个空闲块。[`deallocate()` 源码](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py) 释放后的完整块若仍在哈希索引中，D 恢复时可能再次命中；如果块已被重新分配给不同内容，相应 token 就要重新计算。抢占用额外的状态切换与可能的重算，换取队头请求及时继续执行。
-
-如果其他运行请求都已撤回，当前请求仍拿不到块，`else` 会连当前请求也抢占。这份实现随后要求 `scheduled_seqs` 非空；若本轮一个请求都没选中，`assert scheduled_seqs` 会报错。因此，这段逻辑解决的是常见的资源竞争，不能把它理解为对所有块容量配置都能完成请求的保证。
-
-## 共享前缀与分块 prefill 的剩余计算量
-
 ```python
-if remaining == 0:
-    break
-if not seq.block_table:
-    num_cached_blocks = self.block_manager.can_allocate(seq)
-    if num_cached_blocks == -1:
-        break
-    num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
-else:
-    num_tokens = seq.num_tokens - seq.num_cached_tokens
-if remaining < num_tokens and scheduled_seqs:
-    break
-if not seq.block_table:
-    self.block_manager.allocate(seq, num_cached_blocks)
-seq.num_scheduled_tokens = min(num_tokens, remaining)
-```
-
-`remaining` 是本轮还能计算的 token 数；`num_tokens` 是当前请求**还需要**计算的 token 数。两者分开，才能决定这轮是否放得下当前请求。`block_table` 保存这个请求按顺序使用的物理 KV 块编号。它为空时，说明还没有为当前执行阶段建立块映射：新请求会如此；被抢占后，`deallocate()` 清空块表，也会重新进入这条分支。
-
-第一次分配时，`can_allocate(seq)` 按 token 内容和前缀哈希查找连续、完整、已经算过的 KV 块，并同时检查块容量。返回的 `num_cached_blocks` 是**块数**，乘上 `block_size` 才是可以跳过计算的 token 数。真正将这些共享块编号写进 `seq.block_table` 的是后面的 `allocate(seq, num_cached_blocks)`；它还会设置 `seq.num_cached_tokens = num_cached_blocks * block_size`。[`can_allocate()` 与 `allocate()` 源码](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)
-
-例如，设每块容纳 16 个 token，请求 A 和 B 分词后的前 32 个 token 完全相同，后面的 token 不同，且两者各需 4 块。A 已算好前缀并使用 `[5, 6, 7, 8]`。B 第一次进入时可命中前两块，于是它的块表可以是 `[5, 6, 11, 12]`：`5`、`6` 保存两者共用的前缀 KV，`11`、`12` 留给 B 的不同部分。若 B 总长 64 个 token，`num_cached_blocks = 2`，这一分支得到 `num_tokens = 64 - 2 × 16 = 32`。这些编号是解释性示例，实际编号由空闲块池决定；复用要求 token ID 按块连续一致，文本看起来相似并不足够。
-
-如果 B 的 32 个待计算 token 本轮只得到 20 个预算，`seq.num_scheduled_tokens` 就是 20。模型处理完后，`postprocess()` 把 20 加到 `num_cached_tokens`，此时它是 52。B 的 `block_table` 仍在；下一轮进入 `else`，计算 `64 - 52 = 12`。这里无需再减一次 32 个共享前缀 token，因为 `num_cached_tokens` 已经把复用的 32 和新算好的 20 都记入进度。抢占会清空块表和进度；恢复时重新走 `if`，再次查询仍可用的共享前缀。
-
-`if remaining < num_tokens and scheduled_seqs` 规定：本轮已经选了其他请求，当前请求又放不进剩余预算，就先停下。只有本轮第一个被选中的请求可以使用不完整的 prefill chunk。这个条件使一次 prefill batch 不会同时放入多个仅处理了部分 prompt 的请求。
-
-## 运行队列为何先取出再放回
-
-```python
-while self.running and len(scheduled_seqs) < self.max_num_seqs:
-    seq = self.running.popleft()
-    while not self.block_manager.can_append(seq):
-        if self.running:
-            self.preempt(self.running.pop())
-        else:
-            self.preempt(seq)
-            break
-    else:
-        seq.num_scheduled_tokens = 1
-        seq.is_prefill = False
-        self.block_manager.may_append(seq)
-        scheduled_seqs.append(seq)
 assert scheduled_seqs
 self.running.extendleft(reversed(scheduled_seqs))
 return scheduled_seqs, False
 ```
 
-`popleft()` 从队头取出准备调度的请求，体现这里优先考虑较早进入 `running` 的请求。`pop()` 同样是 `deque` 的高效两端操作；代码用它从队尾挑选被抢占者，保留队头的优先权。先把当前请求取出还有一个作用：资源不足时，`self.running.pop()` 取到的是**其他**运行请求，不会误把当前正在争取资源的请求当作第一个牺牲对象。
+**疑问在于：已经放入 `scheduled_seqs`，为什么还要放回运行队列？** 两个容器记录不同的事。`scheduled_seqs` 只列出**本轮交给模型计算**的请求；`running` 保存**下一轮仍可能继续生成**的请求。模型计算后，`postprocess()` 会在请求结束时调用 `self.running.remove(seq)`，因此选中的请求在执行前需要重新出现在 `running` 中。
 
-取出不代表运行请求已经完成。选中请求仍需留在 `running`，因为模型执行后 `postprocess()` 可能调用 `self.running.remove(seq)` 移除已结束的请求。`scheduled_seqs` 是本轮交给模型计算的列表；`running` 则保存跨轮次继续生成的请求。调度完成后，`extendleft(reversed(scheduled_seqs))` 把选中的请求放回运行队头。
+![运行队列 A、B、C 暂时取出 A、B 后，用 reversed 配合 extendleft，按 A、B、C 的原顺序恢复。](images/scheduler-queue-return.svg)
 
-设 `running = [A, B, C]`，本轮最多选两个请求，三者都不需要抢占。`popleft()` 先后取出 A、B，队列暂时是 `[C]`，`scheduled_seqs = [A, B]`。`extendleft()` 会逐个从左侧插入，所以先把列表反转为 `[B, A]`，插入 B 再插入 A，最终恢复为 `[A, B, C]`。这也说明它不是把 A、B 轮换到队尾：本实现会让已选中的队头请求保持靠前，直到结束、被抢占，或受到其他调度条件限制。
+假设本轮最多选两个请求，初始 `running = [A, B, C]`。两次 `popleft()` 后，`scheduled_seqs = [A, B]`、`running = [C]`。`extendleft()` 会逐个从左边插入；先把列表反转为 `[B, A]`，插入 B 再插入 A，最终得到 `[A, B, C]`。代码恢复的是选中请求原来的队头顺序，未把它们轮换到队尾。

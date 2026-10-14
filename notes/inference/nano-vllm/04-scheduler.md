@@ -705,24 +705,3 @@ blocks[7].ref_count = 0  # 释放，进入空闲池
 **这就是为什么用 `while` 循环：** 一次抢占可能只释放部分块，需要继续抢占直到获得足够资源。
 
 这个设计体现了 LLM 推理系统中**资源管理**和**用户体验**之间的精妙平衡：通过主动的资源调度，确保所有请求都能稳定推进，而不是让部分请求因资源竞争而完全停滞。
-
-## 选中 A、B 后，为什么又把它们放回 `running`
-
-```python
-seq.num_scheduled_tokens = 1
-seq.is_prefill = False
-self.block_manager.may_append(seq)
-scheduled_seqs.append(seq)
-```
-
-```python
-assert scheduled_seqs
-self.running.extendleft(reversed(scheduled_seqs))
-return scheduled_seqs, False
-```
-
-**疑问在于：已经放入 `scheduled_seqs`，为什么还要放回运行队列？** 两个容器记录不同的事。`scheduled_seqs` 只列出**本轮交给模型计算**的请求；`running` 保存**下一轮仍可能继续生成**的请求。模型计算后，`postprocess()` 会在请求结束时调用 `self.running.remove(seq)`，因此选中的请求在执行前需要重新出现在 `running` 中。
-
-![运行队列 A、B、C 暂时取出 A、B 后，用 reversed 配合 extendleft，按 A、B、C 的原顺序恢复。](images/scheduler-queue-return.svg)
-
-假设本轮最多选两个请求，初始 `running = [A, B, C]`。两次 `popleft()` 后，`scheduled_seqs = [A, B]`、`running = [C]`。`extendleft()` 会逐个从左边插入；先把列表反转为 `[B, A]`，插入 B 再插入 A，最终得到 `[A, B, C]`。代码恢复的是选中请求原来的队头顺序，未把它们轮换到队尾。

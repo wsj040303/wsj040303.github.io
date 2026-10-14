@@ -35,7 +35,6 @@
 <li><a href="#section-1">为什么 `if` 减去共享前缀，`else` 却减去 `num_cached_tokens`</a></li>
 <li><a href="#section-2">为什么先用 `popleft()` 把 A 从运行队列取出</a></li>
 <li><a href="#section-3">A 需要新 KV 块时，为什么抢占 D 而不是等它结束</a></li>
-<li><a href="#section-4">选中 A、B 后，为什么又把它们放回 `running`</a></li>
               </ol></nav>
             </details>
           </aside>
@@ -650,18 +649,6 @@ blocks[<span class="tok-number">6</span>].ref_count = <span class="tok-number">1
 blocks[<span class="tok-number">7</span>].ref_count = <span class="tok-number">0</span>  <span class="tok-comment"># 释放，进入空闲池</span></code></pre></figure>
 <p><strong>这就是为什么用 <code>while</code> 循环：</strong> 一次抢占可能只释放部分块，需要继续抢占直到获得足够资源。</p>
 <p>这个设计体现了 LLM 推理系统中<strong>资源管理</strong>和<strong>用户体验</strong>之间的精妙平衡：通过主动的资源调度，确保所有请求都能稳定推进，而不是让部分请求因资源竞争而完全停滞。</p>
-</section>
-<section id="section-4"><h3>选中 A、B 后，为什么又把它们放回 `running`</h3>
-<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>seq.num_scheduled_tokens = <span class="tok-number">1</span>
-seq.is_prefill = <span class="tok-constant">False</span>
-self.block_manager.may_append(seq)
-scheduled_seqs.append(seq)</code></pre></figure>
-<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">assert</span> scheduled_seqs
-self.running.extendleft(reversed(scheduled_seqs))
-<span class="tok-keyword">return</span> scheduled_seqs, <span class="tok-constant">False</span></code></pre></figure>
-<p><strong>疑问在于：已经放入 <code>scheduled_seqs</code>，为什么还要放回运行队列？</strong> 两个容器记录不同的事。<code>scheduled_seqs</code> 只列出<strong>本轮交给模型计算</strong>的请求；<code>running</code> 保存<strong>下一轮仍可能继续生成</strong>的请求。模型计算后，<code>postprocess()</code> 会在请求结束时调用 <code>self.running.remove(seq)</code>，因此选中的请求在执行前需要重新出现在 <code>running</code> 中。</p>
-<figure class="engine-figure"><a href="images/scheduler-queue-return.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/scheduler-queue-return.svg" alt="运行队列 A、B、C 暂时取出 A、B 后，用 reversed 配合 extendleft，按 A、B、C 的原顺序恢复。"></a><figcaption>运行队列 A、B、C 暂时取出 A、B 后，用 reversed 配合 extendleft，按 A、B、C 的原顺序恢复。 点击可打开完整图片。</figcaption></figure>
-<p>假设本轮最多选两个请求，初始 <code>running = [A, B, C]</code>。两次 <code>popleft()</code> 后，<code>scheduled_seqs = [A, B]</code>、<code>running = [C]</code>。<code>extendleft()</code> 会逐个从左边插入；先把列表反转为 <code>[B, A]</code>，插入 B 再插入 A，最终得到 <code>[A, B, C]</code>。代码恢复的是选中请求原来的队头顺序，未把它们轮换到队尾。</p>
 </section>
             <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
 <a href="03-sequence.html">上一章：sequence.py</a>

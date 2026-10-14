@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 476" role="img" aria-labelledby="title desc">
+<title id="title">逐块匹配链式前缀哈希</title>
+<desc id="desc">请求 A 和 B 的前两个完整块相同，所以 h0 h1 连续命中；第三块 token 不同，前缀匹配停止；第四块是最后逻辑块，不参与这次查询。</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1224" height="460" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="48" y="60" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">链式前缀哈希：每一步都带上前一块的结果</text>
+<text x="48" y="94" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="480" fill="#52705b" text-anchor="start">示例每个请求有 4 个逻辑块；代码查询第 0、1、2 块，不查询最后的块 3。</text>
+<text x="216" y="133" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">块 0</text>
+<text x="486" y="133" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">块 1</text>
+<text x="756" y="133" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">块 2</text>
+<text x="1026" y="133" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">块 3</text>
+<text x="48" y="209" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="start">请求 A</text>
+<rect x="100" y="157" width="230" height="105" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="215" y="197" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">T0</text>
+<text x="215" y="231" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">h0：命中</text>
+<path d="M334 208 L365 208" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="370" y="157" width="230" height="105" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="485" y="197" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">T1</text>
+<text x="485" y="231" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">h1：命中</text>
+<path d="M604 208 L635 208" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="640" y="157" width="230" height="105" rx="14" fill="#f8e7d1" stroke="#bed5b7" stroke-width="2"/>
+<text x="755" y="197" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">T₂</text>
+<text x="755" y="231" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">前缀不同</text>
+<path d="M874 208 L905 208" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="910" y="157" width="230" height="105" rx="14" fill="#f0f1ea" stroke="#bed5b7" stroke-width="2"/>
+<text x="1025" y="197" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">尾块</text>
+<text x="1025" y="231" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">不参与查询</text>
+<text x="48" y="345" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="start">请求 B</text>
+<rect x="100" y="293" width="230" height="105" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="215" y="333" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">T0</text>
+<text x="215" y="367" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">h0：命中</text>
+<path d="M334 344 L365 344" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="370" y="293" width="230" height="105" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="485" y="333" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">T1</text>
+<text x="485" y="367" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">h1：命中</text>
+<path d="M604 344 L635 344" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="640" y="293" width="230" height="105" rx="14" fill="#f8e7d1" stroke="#bed5b7" stroke-width="2"/>
+<text x="755" y="333" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">U₂</text>
+<text x="755" y="367" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">前缀不同</text>
+<path d="M874 344 L905 344" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="910" y="293" width="230" height="105" rx="14" fill="#f0f1ea" stroke="#bed5b7" stroke-width="2"/>
+<text x="1025" y="333" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">尾块</text>
+<text x="1025" y="367" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="520" fill="#52705b" text-anchor="middle">不参与查询</text>
+<text x="48" y="442" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="610" fill="#1b5136" text-anchor="start">h₀ = H(T₀)；h₁ = H(h₀ ∥ T₁)；块 2 开始不同，连续前缀在这里停止。</text>
+</svg>

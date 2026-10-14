@@ -36,6 +36,14 @@ const chapters = [
     description: "scheduler.py 完整注释代码及 KV 块抢占、共享前缀、分块 prefill 和运行队列操作的源码解析。",
     deck: "第 4 章 · 完整注释代码与调度决策",
     previous: { href: "03-sequence.html", text: "上一章：sequence.py" },
+    next: { href: "05-block-manager.html", text: "下一章：block_manager.py" },
+  },
+  {
+    stem: "05-block-manager",
+    sourceFile: "block_manager.py",
+    description: "block_manager.py 完整注释代码及引用计数、前缀哈希和 KV 块边界的源码解析。",
+    deck: "第 5 章 · 完整注释代码与 KV 块管理",
+    previous: { href: "04-scheduler.html", text: "上一章：scheduler.py" },
     next: null,
   },
 ];

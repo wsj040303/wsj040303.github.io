@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 497" role="img" aria-labelledby="title desc">
+<title id="title">推理引擎中的块管理职责</title>
+<desc id="desc">LLMEngine 持有 Scheduler 与 ModelRunner；Scheduler 持有 BlockManager 管理编号、引用和哈希；ModelRunner 持有 GPU KV 张量，块编号定位实际数据。</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1204" height="481" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="54" y="59" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">谁决定用哪个块？谁保存实际 K/V？</text>
+<text x="54" y="93" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="480" fill="#52705b" text-anchor="start">调度与块管理在 CPU 侧；模型执行器按块编号读写 GPU KV 张量。</text>
+<rect x="467" y="118" width="286" height="65" rx="14" fill="#dcefd5" stroke="#bed5b7" stroke-width="2"/>
+<text x="610" y="159" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="730" fill="#1b5136" text-anchor="middle">LLMEngine</text>
+<rect x="110" y="236" width="340" height="86" rx="14" fill="#e7f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="280" y="272" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="720" fill="#1b5136" text-anchor="middle">Scheduler</text>
+<text x="280" y="301" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="470" fill="#52705b" text-anchor="middle">选择本轮请求</text>
+<rect x="770" y="236" width="340" height="86" rx="14" fill="#dceaf0" stroke="#abcbd3" stroke-width="2"/>
+<text x="940" y="272" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="720" fill="#1b5136" text-anchor="middle">ModelRunner</text>
+<text x="940" y="301" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="470" fill="#52705b" text-anchor="middle">模型计算与输入准备</text>
+<rect x="110" y="380" width="340" height="87" rx="14" fill="#e7f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="280" y="416" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="720" fill="#1b5136" text-anchor="middle">BlockManager</text>
+<text x="280" y="447" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="470" fill="#52705b" text-anchor="middle">块编号 · 引用数 · 前缀哈希</text>
+<rect x="770" y="380" width="340" height="87" rx="14" fill="#dceaf0" stroke="#abcbd3" stroke-width="2"/>
+<text x="940" y="416" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="720" fill="#1b5136" text-anchor="middle">GPU KV 张量</text>
+<text x="940" y="447" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="470" fill="#52705b" text-anchor="middle">实际 Key / Value 数值</text>
+<path d="M535 184 L341 227" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M685 184 L879 227" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M280 323 L280 369" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M940 323 L940 369" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<path d="M457 421 L757 421" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="610" y="410" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="570" fill="#52705b" text-anchor="middle">块 ID 定位</text>
+</svg>

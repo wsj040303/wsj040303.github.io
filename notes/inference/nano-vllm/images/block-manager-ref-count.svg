@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 386" role="img" aria-labelledby="title desc">
+<title id="title">共享块引用计数</title>
+<desc id="desc">物理块 5 由空闲到 A 使用，再由 A B 共享；A 结束后仍被 B 使用，B 结束后才进入空闲队列。</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1224" height="370" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="58" y="61" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">同一物理块 5：引用数跟随活动请求变化</text>
+<text x="58" y="96" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="470" fill="#52705b" text-anchor="start">ref_count 统计正在使用这份 KV 的请求数。</text>
+<rect x="38" y="137" width="211" height="168" rx="14" fill="#faecd2" stroke="#bed5b7" stroke-width="2"/>
+<text x="143" y="174" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">初始空闲</text>
+<text x="143" y="228" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="690" fill="#1b5136" text-anchor="middle">ref_count = 0</text>
+<text x="143" y="270" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="520" fill="#52705b" text-anchor="middle">属于 free</text>
+<path d="M253 220 L272 220" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="276" y="137" width="211" height="168" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="381" y="174" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">A 使用</text>
+<text x="381" y="228" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="690" fill="#1b5136" text-anchor="middle">ref_count = 1</text>
+<text x="381" y="270" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="520" fill="#52705b" text-anchor="middle">属于 used</text>
+<path d="M491 220 L510 220" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="514" y="137" width="211" height="168" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="619" y="174" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">A、B 共享</text>
+<text x="619" y="228" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="690" fill="#1b5136" text-anchor="middle">ref_count = 2</text>
+<text x="619" y="270" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="520" fill="#52705b" text-anchor="middle">属于 used</text>
+<path d="M729 220 L748 220" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="752" y="137" width="211" height="168" rx="14" fill="#e6f2df" stroke="#bed5b7" stroke-width="2"/>
+<text x="857" y="174" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">A 结束</text>
+<text x="857" y="228" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="690" fill="#1b5136" text-anchor="middle">ref_count = 1</text>
+<text x="857" y="270" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="520" fill="#52705b" text-anchor="middle">属于 used</text>
+<path d="M967 220 L986 220" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="990" y="137" width="211" height="168" rx="14" fill="#faecd2" stroke="#bed5b7" stroke-width="2"/>
+<text x="1095" y="174" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">B 结束</text>
+<text x="1095" y="228" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="690" fill="#1b5136" text-anchor="middle">ref_count = 0</text>
+<text x="1095" y="270" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="520" fill="#52705b" text-anchor="middle">属于 free</text>
+<text x="58" y="350" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="580" fill="#1b5136" text-anchor="start">减到 0 才放回空闲队列；旧哈希与 token_ids 可暂时保留，直到该块被覆盖。</text>
+</svg>

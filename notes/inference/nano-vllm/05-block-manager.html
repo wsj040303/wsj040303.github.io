@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="block_manager.py 完整注释代码及引用计数、前缀哈希和 KV 块边界的源码解析。">
+    <meta name="theme-color" content="#0b2015">
+    <title>block_manager.py: 管理物理 KV 块与前缀缓存 · WSJ</title>
+    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../../assets/garden.css">
+    <link rel="stylesheet" href="../../../assets/inference.css?v=20261014-python">
+    <script src="../../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../../index.html">首页</a><a href="../../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../../papers/index.html">论文阅读</a><a href="../../../projects/index.html">GitHub 项目</a><a href="../../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../../index.html">首页</a><span>/</span><a href="../../../ai-infra/index.html">AI Infra</a><span>/</span><a href="../index.html">推理引擎编写</a><span>/</span><a href="index.html">Nano-vLLM 解读</a><span>/</span>block_manager.py: 管理物理 KV 块与前缀缓存</nav>
+        <div class="reader-heading"><h1>block_manager.py: 管理物理 KV 块与前缀缓存</h1><p class="article-deck">第 5 章 · 完整注释代码与 KV 块管理</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">一个物理块的 `ref_count` 为 0、1、2 时，分别表示什么</a></li>
+<li><a href="#section-2">引擎、调度器和块管理器分别负责什么</a></li>
+<li><a href="#section-3">`_allocate_block` 的下划线与 `__init__` 的双下划线有何区别</a></li>
+<li><a href="#section-4">查询前缀缓存时，为什么要把上一块的哈希接进来</a></li>
+<li><a href="#section-5">哈希已经命中，为什么还要比较 `token_ids`</a></li>
+<li><a href="#section-6">`can_append()` 为什么只在余数为 1 时要求空闲块</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<figure class="engine-code is-complete"><figcaption>完整代码 · block_manager.py <span>Python</span></figcaption><pre><code><span class="tok-keyword">from</span> collections <span class="tok-keyword">import</span> deque
+<span class="tok-keyword">import</span> xxhash          <span class="tok-comment"># 计算前缀块的快速内容哈希，供下一个请求查找可能复用的块。</span>
+<span class="tok-keyword">import</span> numpy <span class="tok-keyword">as</span> np
+
+<span class="tok-keyword">from</span> nanovllm.engine.sequence <span class="tok-keyword">import</span> Sequence
+
+<span class="tok-keyword">class</span> Block:        <span class="tok-comment"># 一个物理 KV 块的 CPU 元数据对象。它不存 GPU 中实际的 K/V 数值。</span>
+    <span class="tok-keyword">def</span> __init__(self, block_id):
+        self.block_id = block_id    <span class="tok-comment"># 给每个物理块一个固定整数编号，作为块表中的引用。</span>
+        self.ref_count = <span class="tok-number">0</span>          <span class="tok-comment"># 初始没有活动请求引用它；多个请求共享完整前缀时可大于 1。</span>
+        self.hash = -<span class="tok-number">1</span>               <span class="tok-comment"># -1 表示当前没有已登记的完整块哈希。</span>
+        self.token_ids = []         <span class="tok-comment"># 暂存该已完成块对应的 token ID，用于命中时再次核对内容。</span>
+
+    <span class="tok-keyword">def</span> update(self, hash: <span class="tok-builtin">int</span> ,token_ids: <span class="tok-builtin">list</span>[<span class="tok-builtin">int</span>]):    <span class="tok-comment"># 完整块算完后，把哈希和 token 内容登记到该块元数据。</span>
+        self.hash = hash
+        self.token_ids = token_ids
+
+    <span class="tok-keyword">def</span> reset(self):
+        self.ref_count = <span class="tok-number">1</span>
+        self.hash = -<span class="tok-number">1</span>
+        self.token_ids = []
+
+<span class="tok-keyword">class</span> BlockManager:                <span class="tok-comment"># 定义块资源管理器；每个引擎的调度器持有一个实例。</span>
+    <span class="tok-keyword">def</span> __init__(self, num_blocks: <span class="tok-builtin">int</span>, block_size: <span class="tok-builtin">int</span>):
+        self.block_size = block_size
+        self.blocks: <span class="tok-builtin">list</span>[Block] = [Block(i) <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(num_blocks)]<span class="tok-comment"># 为每个块编号建立一个 Block 元数据对象；数量由模型执行器对 GPU 可用显存的估算决定。</span>
+        self.hash_to_block_id: <span class="tok-builtin">dict</span>[<span class="tok-builtin">int</span>, <span class="tok-builtin">int</span>] = <span class="tok-builtin">dict</span>()  <span class="tok-comment"># 从完整前缀块哈希映射到物理块 ID，以便快速寻找复用候选。</span>
+        self.free_block_ids: deque[<span class="tok-builtin">int</span>] = deque(<span class="tok-builtin">range</span>(num_blocks))
+        self.used_block_ids: set[<span class="tok-builtin">int</span>] = set()
+
+    @classmethod
+    <span class="tok-keyword">def</span> compute_hash(cls, token_ids: <span class="tok-builtin">list</span>[<span class="tok-builtin">int</span>], prefix: <span class="tok-builtin">int</span> = -<span class="tok-number">1</span>):
+        h = xxhash.xxh64()    <span class="tok-comment">#创建的是一个&quot;哈希计算器&quot;对象，而不是简单的哈希值。这样设计是为了支持增量哈希计算，特别适合处理大数据。</span>
+        <span class="tok-keyword">if</span> prefix != -<span class="tok-number">1</span>:
+            h.update(prefix.to_bytes(<span class="tok-number">8</span>, <span class="tok-string">&quot;little&quot;</span>))<span class="tok-comment"># 除首块外，先把前一段前缀哈希的 8 字节表示写入当前哈希状态。因此相同当前块出现在不同历史前缀之后，会得到不同的链式哈希。</span>
+        h.update(np.array(token_ids).tobytes())   <span class="tok-comment"># 再加入当前块 token ID 的字节表示。</span>
+        <span class="tok-keyword">return</span> h.intdigest()   <span class="tok-comment"># 返回整数哈希，作为 hash_to_block_id 的键。</span>
+
+    <span class="tok-keyword">def</span> _allocate_block(self) -&gt; <span class="tok-builtin">int</span> :    <span class="tok-comment"># 从空闲池为新内容取一个物理块。开头的下划线表示它是管理器内部方法。</span>
+
+        block_id = self.free_block_ids.popleft()   <span class="tok-comment"># 从空闲队列队头取块 ID；调用者应事先确认还有空闲块。</span>
+        block = self.blocks[block_id]    <span class="tok-comment"># 按 ID 找到该块元数据。</span>
+        <span class="tok-keyword">assert</span> block.ref_count == <span class="tok-number">0</span>      <span class="tok-comment"># 只有没有活动引用的块才可重新分配，否则会覆盖别人的 KV 数据。</span>
+        <span class="tok-keyword">if</span> block.hash != -<span class="tok-number">1</span> <span class="tok-keyword">and</span> self.hash_to_block_id.get(block.hash) == block_id:    <span class="tok-comment"># 如果这个空闲块仍是某个哈希的当前登记目标，先从字典删除该映射；这是覆盖旧缓存内容时的淘汰步骤。</span>
+            <span class="tok-keyword">del</span> self.hash_to_block_id[block.hash]
+        block.reset()      <span class="tok-comment"># 清除旧内容标识，开始一份新内容，引用数置为 1。</span>
+        self.used_block_ids.add(block_id)   <span class="tok-comment"># 记录该块现在被活动请求占用。</span>
+        <span class="tok-keyword">return</span> block_id
+
+    <span class="tok-keyword">def</span> _deallocate_block(self, block_id: <span class="tok-builtin">int</span>):   <span class="tok-comment"># 引用数降至 0 后，将物理块放回空闲池。</span>
+        <span class="tok-keyword">assert</span> self.blocks[block_id].ref_count == <span class="tok-number">0</span>        <span class="tok-comment"># 防止仍被其他请求共享的块错误地放回空闲池。</span>
+        self.used_block_ids.remove(block_id)               <span class="tok-comment"># 从活动占用集合删除块 ID。</span>
+        self.free_block_ids.append(block_id)               <span class="tok-comment"># 放到空闲队列末尾；这里没有清除 hash 和 token_ids，因此仍可能在覆盖前复用，也就是说块被释放后，内容还在，可以继续被前缀缓存命中</span>
+
+    <span class="tok-keyword">def</span> can_allocate(self, seq: Sequence) -&gt; <span class="tok-builtin">int</span>:    <span class="tok-comment"># 在真正改动块状态之前，检查这个请求有多少完整前缀块可复用、需要多少可用块。成功返回复用块数；失败返回 -1。</span>
+        h = -<span class="tok-number">1</span>
+        num_cached_blocks = <span class="tok-number">0</span>              <span class="tok-comment"># 当前找到的连续前缀命中块数。只要中间断开，就停止继续匹配。</span>
+        num_new_blocks = seq.num_blocks    <span class="tok-comment"># 先按整个请求当前长度估算要占用的块数。即使本轮只做部分 prefill，当前代码也先为整段 prompt 预留块编号。</span>
+        <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(seq.num_blocks - <span class="tok-number">1</span>): <span class="tok-comment"># 只尝试匹配最后一个逻辑块之前的完整块；最后一个块留给本次计算。长度 513、块大小 256 时，最多检查第 0、1 块。</span>
+            token_ids = seq.block(i)       <span class="tok-comment"># 取第 i 个逻辑块的 token ID。</span>
+            h = self.compute_hash(token_ids, h)    <span class="tok-comment"># 高效的增量哈希计算：将当前块合并到前缀哈希中</span>
+
+            block_id = self.hash_to_block_id.get(h ,-<span class="tok-number">1</span>)   <span class="tok-comment"># 在已登记的完整块字典里找物理块 ID；不存在时用 -1。即查找&quot;是否有现成的块可以复用&quot;</span>
+            <span class="tok-keyword">if</span> block_id == -<span class="tok-number">1</span> <span class="tok-keyword">or</span> self.blocks[block_id].token_ids != token_ids:     <span class="tok-comment"># 即使哈希查到了块，也用保存的 token ID 再核对；当前块没命中，就不再查后续块，因为前缀复用必须连续。</span>
+
+                <span class="tok-keyword">break</span>
+
+            num_cached_blocks += <span class="tok-number">1</span>    <span class="tok-comment"># 确认多一个完整前缀块可复用。</span>
+            <span class="tok-keyword">if</span> block_id <span class="tok-keyword">in</span> self.used_block_ids:   <span class="tok-comment"># 已被活动请求占用的命中块可以增加引用数直接共享，不需要从空闲队列取出，因此减少后面所需空闲块数。</span>
+                num_new_blocks -= <span class="tok-number">1</span>
+        <span class="tok-keyword">if</span> <span class="tok-builtin">len</span>(self.free_block_ids) &lt; num_new_blocks:  <span class="tok-comment"># 若空闲池不足以容纳其余块，返回 -1。命中但目前空闲的块仍在空闲队列中，所以也计入需要从空闲池取出的数量。</span>
+            <span class="tok-keyword">return</span> -<span class="tok-number">1</span>
+        <span class="tok-keyword">return</span> num_cached_blocks
+
+    <span class="tok-keyword">def</span> allocate(self, seq: Sequence, num_cached_blocks: <span class="tok-builtin">int</span>):     <span class="tok-comment"># 正式为新请求关联命中块和分配其余块。</span>
+        <span class="tok-keyword">assert</span> <span class="tok-keyword">not</span> seq.block_table          <span class="tok-comment"># 只接受尚未建立块表的请求；已做部分 prefill 的请求沿用原块表。</span>
+        h = -<span class="tok-number">1</span>
+        <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(num_cached_blocks):     <span class="tok-comment"># 依照相同的哈希顺序找到每个命中块对应的 block_id 和 Block 对象。</span>
+            token_ids = seq.block(i)
+            h = self.compute_hash(token_ids, h)
+            block_id = self.hash_to_block_id[h]
+            block = self.blocks[block_id]
+            <span class="tok-keyword">if</span> block_id <span class="tok-keyword">in</span> self.used_block_ids:     <span class="tok-comment"># 若块正被其他活动请求使用，将引用数加 1，允许两个请求共享同一份完整前缀 KV。</span>
+                block.ref_count += <span class="tok-number">1</span>
+            <span class="tok-keyword">else</span>:    <span class="tok-comment"># 若命中块原本是空闲的，把引用数设为 1，从空闲队列取出，并加入活动占用集合。它的已计算 KV 内容继续保留。</span>
+                block.ref_count = <span class="tok-number">1</span>
+                self.free_block_ids.remove(block_id)
+                self.used_block_ids.add(block_id)
+            seq.block_table.append(block_id)     <span class="tok-comment"># 按逻辑顺序把命中块的物理编号加入请求块表。</span>
+        <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(num_cached_blocks, seq.num_blocks):  <span class="tok-comment"># 对没有命中的逻辑块逐个调用 _allocate_block()，分配全新的物理块编号。</span>
+            seq.block_table.append(self._allocate_block())
+        seq.num_cached_tokens = num_cached_blocks * self.block_size    <span class="tok-comment"># 命中 n 个完整块，则前 n × block_size 个 token 已有可用 KV，不必再 prefill。</span>
+
+    <span class="tok-keyword">def</span> deallocate(self, seq: Sequence):<span class="tok-comment"># 当请求完成或被抢占时，解除它对每个物理块的引用。</span>
+        <span class="tok-keyword">for</span> block_id <span class="tok-keyword">in</span> reversed(seq.block_table):    <span class="tok-comment"># 从块表末尾向前处理；这个顺序也使请求尾部通常先回到空闲池。</span>
+            block = self.blocks[block_id]
+            block.ref_count -= <span class="tok-number">1</span>
+            <span class="tok-keyword">if</span> block.ref_count == <span class="tok-number">0</span>:
+                self._deallocate_block(block_id)   <span class="tok-comment"># 只有无人使用的块才调用 _deallocate_block()，重新进入空闲队列。</span>
+        seq.num_cached_tokens = <span class="tok-number">0</span>    <span class="tok-comment"># 清除该请求的已算 token 进度；抢占后再调度要重新检查哪些完整前缀还能命中。</span>
+        seq.block_table.clear()      <span class="tok-comment"># 清空请求对物理块的映射。GPU KV 大张量本身仍由执行器持有，不在这里销毁。</span>
+
+    <span class="tok-keyword">def</span> can_append(self, seq: Sequence) -&gt; <span class="tok-builtin">bool</span>:       <span class="tok-comment">#判断下一轮 decode 是否有足够块空间。</span>
+
+        <span class="tok-keyword">return</span> <span class="tok-builtin">len</span>(self.free_block_ids) &gt;= (<span class="tok-builtin">len</span>(seq) % self.block_size == <span class="tok-number">1</span>)
+
+    <span class="tok-keyword">def</span> may_append(self, seq: Sequence):   <span class="tok-comment"># 条件同上；跨块边界时正式分配一个新块并追加到 seq.block_table。调用前应已通过 can_append() 检查。</span>
+        <span class="tok-keyword">if</span> <span class="tok-builtin">len</span>(seq) % self.block_size == <span class="tok-number">1</span>:
+            seq.block_table.append(self._allocate_block())
+
+    <span class="tok-keyword">def</span> hash_blocks(self, seq: Sequence):    <span class="tok-comment"># 将本轮计算后成为完整块的内容登记为可复用前缀。它在 postprocess() 更新 num_cached_tokens 之前调用。</span>
+        start = seq.num_cached_tokens // self.block_size
+        end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
+        <span class="tok-keyword">if</span> start == end: <span class="tok-keyword">return</span>
+        h = self.blocks[seq.block_table[start - <span class="tok-number">1</span>]].hash <span class="tok-keyword">if</span> start &gt; <span class="tok-number">0</span> <span class="tok-keyword">else</span> -<span class="tok-number">1</span> <span class="tok-comment"># 若前面已有完整块，从上一块保存的链式哈希继续；否则从 -1 开始。</span>
+        <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(start, end):
+            block = self.blocks[seq.block_table[i]]
+            token_ids = seq.block(i)
+            h = self.compute_hash(token_ids, h) <span class="tok-comment"># 计算到当前块为止的前缀哈希。</span>
+            block.update(h, token_ids)<span class="tok-comment"># 在块元数据中保存当前完整内容的哈希与 token ID。</span>
+            self.hash_to_block_id[h] = block.block_id<span class="tok-comment"># 让以后的请求可以根据前缀哈希找到该物理块。</span></code></pre></figure>
+<section id="section-1"><h3>一个物理块的 `ref_count` 为 0、1、2 时，分别表示什么</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">class</span> Block:
+    <span class="tok-keyword">def</span> __init__(self, block_id):
+        self.block_id = block_id
+        self.ref_count = <span class="tok-number">0</span>
+        self.hash = -<span class="tok-number">1</span>
+        self.token_ids = []</code></pre></figure>
+<p><strong>要解决的问题是：A 和 B 共享同一个前缀块时，A 结束会不会把 B 正在使用的块释放？</strong> <code>ref_count</code> 记录当前有多少个请求持有这个物理块。刚创建时是 0；A 使用时是 1；B 也复用它时是 2；若还有第三个请求共享，就是 3。此时 A 结束只会把引用数从 2 减到 1，B 仍可以读取这份 KV 数据。</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">if</span> block_id <span class="tok-keyword">in</span> self.used_block_ids:
+    block.ref_count += <span class="tok-number">1</span>
+<span class="tok-keyword">else</span>:
+    block.ref_count = <span class="tok-number">1</span>
+    self.free_block_ids.remove(block_id)
+    self.used_block_ids.add(block_id)</code></pre></figure>
+<p><code>allocate()</code> 中，命中的块若已经被活动请求占用，就增加 <code>ref_count</code>；若命中的是空闲但内容尚未被覆盖的块，就从空闲队列移出，并把引用数设为 1。释放请求时，<code>deallocate()</code> 对它块表中的每个块减 1；只有减到 0 才放回空闲队列。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>allocate()</code> 与 <code>deallocate()</code> 源码</a></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">for</span> block_id <span class="tok-keyword">in</span> reversed(seq.block_table):
+    block = self.blocks[block_id]
+    block.ref_count -= <span class="tok-number">1</span>
+    <span class="tok-keyword">if</span> block.ref_count == <span class="tok-number">0</span>:
+        self._deallocate_block(block_id)</code></pre></figure>
+<figure class="engine-figure"><a href="images/block-manager-ref-count.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/block-manager-ref-count.svg" alt="物理 KV 块 5 先由 A 持有，再由 A 和 B 共享；A 结束后引用数降为 1，B 结束后降为 0 并进入空闲队列。"></a><figcaption>物理 KV 块 5 先由 A 持有，再由 A 和 B 共享；A 结束后引用数降为 1，B 结束后降为 0 并进入空闲队列。 点击可打开完整图片。</figcaption></figure>
+<p>图中的块 5 是解释性示例。<code>ref_count = 0</code> 表示<strong>当前没有请求持有</strong>，并不表示该块的旧内容立刻消失：<code>_deallocate_block()</code> 只把编号放回空闲队列，没有清空 <code>hash</code> 和 <code>token_ids</code>。旧内容尚未被新分配覆盖时，前缀缓存仍可能命中它；真正拿它写新内容时，<code>_allocate_block()</code> 才移除旧哈希映射并调用 <code>reset()</code>。</p>
+</section>
+<section id="section-2"><h3>引擎、调度器和块管理器分别负责什么</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">class</span> BlockManager:
+    <span class="tok-keyword">def</span> __init__(self, num_blocks: <span class="tok-builtin">int</span>, block_size: <span class="tok-builtin">int</span>):
+        self.block_size = block_size
+        self.blocks: <span class="tok-builtin">list</span>[Block] = [Block(i) <span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(num_blocks)]
+        self.hash_to_block_id: <span class="tok-builtin">dict</span>[<span class="tok-builtin">int</span>, <span class="tok-builtin">int</span>] = <span class="tok-builtin">dict</span>()
+        self.free_block_ids: deque[<span class="tok-builtin">int</span>] = deque(<span class="tok-builtin">range</span>(num_blocks))
+        self.used_block_ids: set[<span class="tok-builtin">int</span>] = set()</code></pre></figure>
+<p><strong>这里要定位的是：这份文件管理的究竟是 GPU 上的 KV 数据，还是决定如何使用这些数据的记录？</strong> <code>BlockManager</code> 保存的是 CPU 侧的块元数据：每个编号对应的 <code>Block</code>、空闲与使用中的编号，以及从前缀哈希查块编号的字典。<code>Block</code> 的 <code>token_ids</code> 用来核对缓存内容；实际的 Key/Value 张量由模型执行器持有。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner</code> 源码</a></p>
+<figure class="engine-figure"><a href="images/block-manager-ownership.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/block-manager-ownership.svg" alt="LLMEngine 持有 Scheduler 与 ModelRunner；Scheduler 持有 BlockManager，后者管理块编号与哈希；ModelRunner 持有 GPU KV 张量。"></a><figcaption>LLMEngine 持有 Scheduler 与 ModelRunner；Scheduler 持有 BlockManager，后者管理块编号与哈希；ModelRunner 持有 GPU KV 张量。 点击可打开完整图片。</figcaption></figure>
+<p>请求由 <code>LLMEngine.add_request()</code> 加入调度器，<code>generate()</code> 驱动后续轮次。<code>Scheduler.schedule()</code> 决定本轮选哪些请求，并调用 <code>BlockManager</code> 检查、分配或追加块；请求被抢占时由 <code>Scheduler.preempt()</code> 解除块引用，正常结束时由 <code>Scheduler.postprocess()</code> 解除引用。<code>LLMEngine</code> 同时持有 <code>ModelRunner</code>，后者按请求的块表把本轮 token 的 KV 写入 GPU 张量。图中的两条分支说明了职责边界：块管理器维护<strong>编号和占用关系</strong>，执行器计算并保存<strong>实际 K/V 数值</strong>。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer"><code>LLMEngine</code></a>、<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>Scheduler</code></a></p>
+</section>
+<section id="section-3"><h3>`_allocate_block` 的下划线与 `__init__` 的双下划线有何区别</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">class</span> BlockManager:
+    <span class="tok-keyword">def</span> __init__(self, num_blocks: <span class="tok-builtin">int</span>, block_size: <span class="tok-builtin">int</span>):
+        self.block_size = block_size</code></pre></figure>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">def</span> _allocate_block(self) -&gt; <span class="tok-builtin">int</span>:
+    block_id = self.free_block_ids.popleft()
+    block = self.blocks[block_id]
+    <span class="tok-keyword">assert</span> block.ref_count == <span class="tok-number">0</span></code></pre></figure>
+<p><strong>问题落在方法名上：<code>_allocate_block()</code> 前面只有一个下划线，Python 会禁止外部调用吗？</strong> 不会。单个前导下划线是“供类内部使用”的命名约定。这个方法只从空闲队列取出一个物理块、核对引用数并准备覆盖旧内容；对外的 <code>allocate(seq, num_cached_blocks)</code> 会先处理前缀共享，再在未命中的位置调用 <code>_allocate_block()</code>。调用方应使用完成整套步骤的公开方法，而不是绕过它直接分配一个块。</p>
+<p>笔记里还比较了另外两种名字，含义不同：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>写法</th>
+<th>在此处的例子</th>
+<th>Python 如何处理</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>_name</code></td>
+<td><code>_allocate_block</code></td>
+<td>约定为内部接口，名称本身仍可访问。</td>
+</tr>
+<tr>
+<td><code>__name</code></td>
+<td>假设写成 <code>__secret</code></td>
+<td>类内名称会改写为 <code>_BlockManager__secret</code>；本文件没有这种成员。</td>
+</tr>
+<tr>
+<td><code>__name__</code></td>
+<td><code>__init__</code></td>
+<td>Python 识别的特殊方法；构造对象时自动调用。</td>
+</tr>
+</tbody></table></div>
+</section>
+<section id="section-4"><h3>查询前缀缓存时，为什么要把上一块的哈希接进来</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>@classmethod
+<span class="tok-keyword">def</span> compute_hash(cls, token_ids: <span class="tok-builtin">list</span>[<span class="tok-builtin">int</span>], prefix: <span class="tok-builtin">int</span> = -<span class="tok-number">1</span>):
+    h = xxhash.xxh64()
+    <span class="tok-keyword">if</span> prefix != -<span class="tok-number">1</span>:
+        h.update(prefix.to_bytes(<span class="tok-number">8</span>, <span class="tok-string">&quot;little&quot;</span>))
+    h.update(np.array(token_ids).tobytes())
+    <span class="tok-keyword">return</span> h.intdigest()</code></pre></figure>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(seq.num_blocks - <span class="tok-number">1</span>):
+    token_ids = seq.block(i)
+    h = self.compute_hash(token_ids, h)
+    block_id = self.hash_to_block_id.get(h, -<span class="tok-number">1</span>)</code></pre></figure>
+<p><strong>要匹配的是从请求开头到当前块为止的完整前缀，而不只是当前块本身。</strong> 设逻辑块 0、1 的 token 分别是 <code>T₀</code>、<code>T₁</code>。首块得到 <code>h₀ = H(T₀)</code>；下一块把 <code>h₀</code> 的 8 字节表示与 <code>T₁</code> 的字节依次送进哈希计算器，得到 <code>h₁ = H(h₀ ∥ T₁)</code>。分别计算两个块的哈希再相加，不能表示这样一段有顺序的前缀。相同的 <code>T₁</code> 接在不同的首块后面通常得到不同的前缀哈希；若发生哈希碰撞，后文的 token 核对会阻止错误复用。代码每次创建一个哈希计算器，通过传入上一个结果形成这条链。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>compute_hash()</code> 与 <code>can_allocate()</code> 源码</a></p>
+<figure class="engine-figure"><a href="images/block-manager-prefix-hash.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/block-manager-prefix-hash.svg" alt="两个请求先后比较第 0 块和第 1 块的链式前缀哈希；只有从开头连续相同的完整块才能复用。"></a><figcaption>两个请求先后比较第 0 块和第 1 块的链式前缀哈希；只有从开头连续相同的完整块才能复用。 点击可打开完整图片。</figcaption></figure>
+<p>图中的 A、B 前两块 token 相同，因此查询 B 时先命中块 0，再以相同的 <code>h₀</code> 计算并命中块 1。<code>hash_blocks()</code> 在模型算完完整块后，把链式哈希登记到 <code>hash_to_block_id</code>；<code>can_allocate()</code> 从请求开头逐块查这个字典，遇到首个不匹配就停止。循环只检查 <code>range(seq.num_blocks - 1)</code>，即当前最后一个逻辑块不作为可复用前缀候选。</p>
+</section>
+<section id="section-5"><h3>哈希已经命中，为什么还要比较 `token_ids`</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>block_id = self.hash_to_block_id.get(h, -<span class="tok-number">1</span>)
+<span class="tok-keyword">if</span> block_id == -<span class="tok-number">1</span> <span class="tok-keyword">or</span> self.blocks[block_id].token_ids != token_ids:
+    <span class="tok-keyword">break</span></code></pre></figure>
+<p><strong>疑问是：字典已经找到了块编号，为什么还可能判定失败？</strong> 哈希把大量不同的 token 序列压缩为有限大小的整数，理论上不同内容可能得到同一个值。查到的 <code>block_id</code> 只是候选；代码再比较该物理块保存的当前块 <code>token_ids</code> 与请求的当前块是否逐项相同。若不同，就不复用，并停止检查后面的块。前面的完整块已经在前几次循环中逐一核对，所以这里只需要检查当前块。</p>
+<p>例如，设块大小为 2，假设块 0 的哈希恰好把内容 <code>[1, 2]</code> 与 <code>[9, 9]</code> 映射成相同的整数。查询请求 <code>[9, 9]</code> 时字典可能返回存着 <code>[1, 2]</code> 的块；第二个条件会挡住这次错误复用。这个数字例子只说明判断顺序，不表示真实运行中观测到哈希碰撞。</p>
+</section>
+<section id="section-6"><h3>`can_append()` 为什么只在余数为 1 时要求空闲块</h3>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">def</span> can_append(self, seq: Sequence) -&gt; <span class="tok-builtin">bool</span>:
+    <span class="tok-keyword">return</span> <span class="tok-builtin">len</span>(self.free_block_ids) &gt;= (<span class="tok-builtin">len</span>(seq) % self.block_size == <span class="tok-number">1</span>)
+
+<span class="tok-keyword">def</span> may_append(self, seq: Sequence):
+    <span class="tok-keyword">if</span> <span class="tok-builtin">len</span>(seq) % self.block_size == <span class="tok-number">1</span>:
+        seq.block_table.append(self._allocate_block())</code></pre></figure>
+<p><strong>问题在于：块大小为 4 时，序列长度恰好为 4 看起来已经填满，为什么此时不检查新块；长度变成 5 才检查？</strong> <code>Sequence</code> 的 token 列表包含刚采样出来、尚未为其计算 KV 的最后一个 token。decode 本轮要处理这个最后的 token。长度为 4 时，它仍占第一个逻辑块的末尾位置；本轮处理后又采样出第 5 个 token，序列长度变为 5。下一轮处理第 5 个 token 时，它才需要第二个物理块。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer"><code>Sequence.append_token()</code></a></p>
+<figure class="engine-figure"><a href="images/block-manager-append-boundary.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/block-manager-append-boundary.svg" alt="块大小为 4：序列长度为 4 时最后一个 token 仍在当前块；长度为 5 时最后一个 token 落到新块的首位，需要至少一个空闲块；长度为 6 时可继续用该块。"></a><figcaption>块大小为 4：序列长度为 4 时最后一个 token 仍在当前块；长度为 5 时最后一个 token 落到新块的首位，需要至少一个空闲块；长度为 6 时可继续用该块。 点击可打开完整图片。</figcaption></figure>
+<p>括号里的比较式产生布尔值：余数是 1 时为 <code>True</code>，在整数比较中相当于 1，所以 <code>can_append()</code> 要求空闲块数至少为 1；其他余数得到 <code>False</code>，相当于 0，条件总能通过。真正取出新块的是紧接着的 <code>may_append()</code>。图中长度 4、5、6 与代码的余数 0、1、2 一一对应。</p>
+</section>
+            <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
+<a href="04-scheduler.html">上一章：scheduler.py</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

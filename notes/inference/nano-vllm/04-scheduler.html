@@ -182,7 +182,8 @@ self.running.extendleft(reversed(scheduled_seqs))
 <p>假设本轮最多选两个请求，初始 <code>running = [A, B, C]</code>。两次 <code>popleft()</code> 后，<code>scheduled_seqs = [A, B]</code>、<code>running = [C]</code>。<code>extendleft()</code> 会逐个从左边插入；先把列表反转为 <code>[B, A]</code>，插入 B 再插入 A，最终得到 <code>[A, B, C]</code>。代码恢复的是选中请求原来的队头顺序，未把它们轮换到队尾。</p>
 </section>
             <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
-<a href="03-sequence.html">上一章：sequence.py</a></div>
+<a href="03-sequence.html">上一章：sequence.py</a>
+<a href="05-block-manager.html">下一章：block_manager.py</a></div>
           </article>
         </div>
       </main>

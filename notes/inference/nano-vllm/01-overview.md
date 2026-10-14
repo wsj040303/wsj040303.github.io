@@ -1,6 +1,6 @@
 # Nano-vLLM 项目概览与源码阅读路径
 
-Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 [Nano-vLLM 提交 `bb823b3`](https://github.com/GeeeekExplorer/nano-vllm/tree/bb823b3e06983d71485a8e1f23715ebd87d98ef8) 为阅读基准，沿着一次请求的运行路径理解请求状态、调度、KV Cache 和模型执行。第一章建立组件关系；第二章从 `LLMEngine` 开始追踪代码。
+Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 [Nano-vLLM 提交 `bb823b3`](https://github.com/GeeeekExplorer/nano-vllm/tree/bb823b3e06983d71485a8e1f23715ebd87d98ef8) 为阅读基准，沿着一次请求的运行路径理解请求状态、调度、KV Cache 和模型执行。第一章建立组件关系；第二章与第三章分别阅读 `llm_engine.py` 和 `sequence.py` 的完整注释代码。
 
 ## 项目定位与阅读范围
 
@@ -38,7 +38,7 @@ Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 
 阅读顺序按对象依赖安排，而非按目录字母顺序。每一步都能回答一个具体问题，再进入下一步。
 
 1. [`example.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py) 和 [`llm_engine.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py)：找到对外入口、请求何时入队，以及一次 `step()` 的调用顺序。下一章详细解释这一段。
-2. [`sequence.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)：确认请求状态怎样随 prefill、decode 和完成而变化。
+2. [`sequence.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)：确认请求状态怎样随 prefill、decode 和完成而变化；本站[第 3 章](03-sequence.html)给出完整注释代码。
 3. [`scheduler.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py) 与 [`block_manager.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py)：解释本轮选择和 KV 资源约束。以调度优化为目标时，这是最先需要读透的两份文件。
 4. [`model_runner.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py)：追踪选中的请求怎样变成 GPU 输入，以及块编号怎样变成 Attention 可读的映射。
 5. [`context.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/utils/context.py)、[`attention.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py) 和 [`qwen3.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py)：理解本轮元数据、KV 写入和模型前向。初读时先看输入输出，随后再追具体算子。
@@ -46,4 +46,4 @@ Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 
 
 ## 本系列的验证边界
 
-本文解释的是指定提交中的代码路径。图中的模块关系和上面的 `[A,B,C] → D` 算例用于理解实现，并非性能实测结果。完成第二章后，可以用两个短请求手工记录每轮的 `waiting`、`running`、`num_cached_tokens` 和 `is_prefill`；这些状态比只看最终生成文本更能检验自己是否理解了引擎。
+本文解释的是指定提交中的代码路径。图中的模块关系和上面的 `[A,B,C] → D` 算例用于理解实现，并非性能实测结果。完成前两篇代码解析后，可以用两个短请求手工记录每轮的 `waiting`、`running`、`num_cached_tokens` 和 `is_prefill`；这些状态比只看最终生成文本更能检验自己是否理解了引擎。

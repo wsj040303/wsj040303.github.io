@@ -18,7 +18,9 @@
 .engine-article .engine-code figcaption { display: flex; justify-content: space-between; gap: 14px; padding: 9px 14px; border-bottom: 1px solid #46634d; background: #224733; color: #f2f3df; font-size: 11px; letter-spacing: .04em; }
 .engine-article .engine-code figcaption span { color: #c8e3b9; }
 .engine-article .engine-code pre { margin: 0; padding: 15px 16px; overflow-x: auto; background: #10251b; }
+.engine-article .engine-code.is-complete pre { max-height: 58rem; overflow-y: auto; }
 .engine-article .engine-code code { padding: 0; border: 0; background: transparent; color: #e7efe2; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12.5px; line-height: 1.72; white-space: pre; word-break: normal; }
+.engine-article .engine-code.is-complete code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .engine-article .reader-actions { margin-top: 42px; }
 .engine-article .source-note { margin-top: 18px; font-size: 12px; color: #58755d; }
 
@@ -27,5 +29,6 @@
 }
 @media (max-width: 650px) {
   .topic-list.inference-topics { grid-template-columns: minmax(0, 1fr); }
+  .engine-article .engine-code.is-complete pre { max-height: 36rem; }
   .engine-article .engine-figure::after { content: "← 横向滑动查看完整示意图 →"; display: block; padding: 0 16px 12px; color: #647c68; font-size: 11px; }
 }

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 430" role="img" aria-labelledby="title desc">
+  <title id="title">Sequence 在 prefill 与 decode 中的状态变化</title>
+  <desc id="desc">新请求的 token 为 A、B、C，num_tokens 为 3，num_cached_tokens 为 0；prefill 后采样 D，num_tokens 为 4，num_cached_tokens 为 3；decode 用 D 计算并采样 E，num_tokens 为 5，num_cached_tokens 为 4；达到两个输出 token 后结束。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3e7851" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 29px; font-weight: 750; }
+      .heading { font-size: 22px; font-weight: 720; }
+      .body { font-size: 16px; fill: #3e5b46; }
+      .code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 17px; fill: #215b3c; }
+      .hint { font-size: 16px; fill: #56745f; }
+      .arrow { fill: none; stroke: #3e7851; stroke-width: 3; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1164" height="414" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="57" class="title">一个请求生成两个 token 时，Sequence 如何变化</text>
+
+  <rect x="42" y="96" width="310" height="232" rx="18" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="62" y="133" class="heading">新请求 · WAITING</text>
+  <text x="62" y="171" class="code">token_ids = [A, B, C]</text>
+  <text x="62" y="209" class="body">num_tokens = 3</text>
+  <text x="62" y="238" class="body">num_cached_tokens = 0</text>
+  <text x="62" y="283" class="hint">尚未执行模型</text>
+
+  <rect x="435" y="96" width="310" height="232" rx="18" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="455" y="133" class="heading">Prefill 后 · RUNNING</text>
+  <text x="455" y="171" class="code">token_ids = [A, B, C, D]</text>
+  <text x="455" y="209" class="body">num_tokens = 4</text>
+  <text x="455" y="238" class="body">num_cached_tokens = 3</text>
+  <text x="455" y="283" class="hint">D 已采样，尚未计算它的 KV</text>
+
+  <rect x="828" y="96" width="310" height="232" rx="18" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="848" y="133" class="heading">Decode 后 · FINISHED</text>
+  <text x="848" y="171" class="code">token_ids = [A, B, C, D, E]</text>
+  <text x="848" y="209" class="body">num_tokens = 5</text>
+  <text x="848" y="238" class="body">num_cached_tokens = 4</text>
+  <text x="848" y="283" class="hint">D 的 KV 已算；E 是最终输出</text>
+
+  <path class="arrow" d="M354 211 H426"/>
+  <path class="arrow" d="M747 211 H819"/>
+  <text x="358" y="189" class="hint">处理 A B C</text>
+  <text x="748" y="189" class="hint">处理 D</text>
+
+  <text x="43" y="380" class="hint">解释性算例：max_tokens = 2，ignore_eos = True；采样 token 先追加到列表，下一轮才为它计算 KV。</text>
+</svg>

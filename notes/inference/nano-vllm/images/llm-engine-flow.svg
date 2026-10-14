@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 490" role="img" aria-labelledby="title desc">
+  <title id="title">LLMEngine 初始化与生成控制路径</title>
+  <desc id="desc">初始化路径依次创建 Config、ModelRunner、Tokenizer 和 Scheduler。生成路径先通过 add_request 将所有请求入队，然后反复执行 step 内的 schedule、run、postprocess，最后按 seq_id 排序和解码。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3e7851" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 29px; font-weight: 750; }
+      .lane { font-size: 20px; font-weight: 720; }
+      .box { font-size: 18px; font-weight: 650; }
+      .small { font-size: 15px; fill: #4a6954; }
+      .arrow { fill: none; stroke: #3e7851; stroke-width: 3; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="474" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="56" class="title">llm_engine.py 的两条控制路径</text>
+
+  <text x="44" y="118" class="lane">初始化</text>
+  <rect x="168" y="86" width="200" height="80" rx="15" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="188" y="122" class="box">Config</text><text x="188" y="146" class="small">模型目录与运行参数</text>
+  <rect x="425" y="86" width="200" height="80" rx="15" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="445" y="122" class="box">ModelRunner</text><text x="445" y="146" class="small">权重与 GPU KV 块数</text>
+  <rect x="682" y="86" width="200" height="80" rx="15" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="702" y="122" class="box">Tokenizer</text><text x="702" y="146" class="small">模型对应的 EOS</text>
+  <rect x="939" y="86" width="200" height="80" rx="15" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="959" y="122" class="box">Scheduler</text><text x="959" y="146" class="small">接收块数与 EOS</text>
+  <path class="arrow" d="M370 126 H416"/><path class="arrow" d="M627 126 H673"/><path class="arrow" d="M884 126 H930"/>
+
+  <text x="44" y="260" class="lane">生成</text>
+  <rect x="168" y="226" width="200" height="96" rx="15" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="188" y="265" class="box">add_request</text><text x="188" y="292" class="small">所有 prompt 先入队</text>
+  <rect x="425" y="226" width="200" height="96" rx="15" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="445" y="265" class="box">schedule</text><text x="445" y="292" class="small">本轮请求与阶段</text>
+  <rect x="682" y="226" width="200" height="96" rx="15" fill="#eaf2df" stroke="#bad2b2" stroke-width="2"/>
+  <text x="702" y="265" class="box">run</text><text x="702" y="292" class="small">模型执行与采样</text>
+  <rect x="939" y="226" width="200" height="96" rx="15" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="959" y="265" class="box">postprocess</text><text x="959" y="292" class="small">更新状态与释放</text>
+  <path class="arrow" d="M370 274 H416"/><path class="arrow" d="M627 274 H673"/><path class="arrow" d="M884 274 H930"/>
+
+  <path class="arrow" d="M1039 326 V383 H526 V332"/>
+  <text x="643" y="367" class="small">未完成请求 → 下一次 step()</text>
+  <text x="43" y="447" class="small">队列清空后：按 seq_id 排序 → tokenizer.decode() → 返回 text 与 token_ids。</text>
+</svg>

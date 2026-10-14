@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="sequence.py 完整注释代码及请求状态、token 计数、KV 块视图与跨进程序列化的源码解析。">
+    <meta name="theme-color" content="#0b2015">
+    <title>sequence.py: 保存单个请求的生成状态与 KV 块视图 · WSJ</title>
+    <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../../assets/garden.css">
+    <link rel="stylesheet" href="../../../assets/inference.css">
+    <script src="../../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../../index.html">首页</a><a href="../../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../../papers/index.html">论文阅读</a><a href="../../../projects/index.html">GitHub 项目</a><a href="../../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../../index.html">首页</a><span>/</span><a href="../../../ai-infra/index.html">AI Infra</a><span>/</span><a href="../index.html">推理引擎编写</a><span>/</span><a href="index.html">Nano-vLLM 解读</a><span>/</span>sequence.py: 保存单个请求的生成状态与 KV 块视图</nav>
+        <div class="reader-heading"><h1>sequence.py: 保存单个请求的生成状态与 KV 块视图</h1><p class="article-deck">第 3 章 · 完整注释代码与请求状态</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">文件职责与对象边界</a></li>
+<li><a href="#section-2">状态、编号与构造参数</a></li>
+<li><a href="#section-3">三个 token 计数与生成边界</a></li>
+<li><a href="#section-4">块数、块切片与调度器接口</a></li>
+<li><a href="#section-5">跨进程状态传递</a></li>
+<li><a href="#section-6">手敲代码的核对位置</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<figure class="engine-code is-complete"><figcaption>完整代码 · sequence.py <span>Python</span></figcaption><pre><code># 引入浅拷贝函数。构造请求时复制输入 token 列表，使后续 append_token() 不改变调用者原来的列表。元素是整数，浅拷贝已经足够隔离列表本身。
+from copy import copy
+# Enum 用于定义有限的状态集合，auto() 给各状态自动分配内部值。状态名比具体数字重要。
+from enum import Enum, auto
+# count() 产生递增整数，用作进程内请求 ID。
+from itertools import count
+
+# SamplingParams 提供当前请求的温度、生成上限和是否忽略 EOS。
+from nanovllm.sampling_params import SamplingParams
+
+
+# SequenceStatus 限定一个请求只能处于等待、运行或完成状态。
+class SequenceStatus(Enum):
+    # 请求尚在等待可用计算或资源；包括尚未完成 prefill 的请求。
+    WAITING = auto()
+    # 完整 prompt 已被安排处理，接下来可进入 decode。调度器在完成 prefill 的调度阶段就会把状态改为 RUNNING，早于该轮 GPU 计算真正结束。
+    RUNNING = auto()
+    # 到达 EOS 或生成长度上限后不再参与调度。
+    FINISHED = auto()
+
+
+# 一个 Sequence 保存一个请求的 token、调度状态和 KV 块编号。
+class Sequence:
+    # 类级默认 KV 块大小；LLMEngine.__init__() 会把它改成当前引擎配置的 kvcache_block_size。因此所有 Sequence 实例在同一进程内共享这个类属性。
+    block_size = 256
+    # 类级 ID 生成器。每次构造 Sequence 都前进一步；模型 warmup 也构造临时 Sequence，因此第一个正式请求的 ID 不一定是 0。
+    counter = count()
+
+    # token_ids 是非空的 prompt ID 列表；sampling_params 是该请求的采样设置。默认参数对象创建一次，本类只读取它。
+    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+        # 为这个请求取一个新的整数 ID。这个 ID 之后用于将完成结果恢复到输入顺序。
+        self.seq_id = next(Sequence.counter)
+        # 新请求先处于等待状态。
+        self.status = SequenceStatus.WAITING
+        # 保存输入 token 列表的副本。以后生成的 token 也会追加到同一列表。
+        self.token_ids = copy(token_ids)
+        # 保存当前最后一个 token，供 decode 每轮直接取用。新请求刚创建时它是 prompt 的最后一个 token。
+        self.last_token = token_ids[-1]
+        # 当前列表总长度；生成过程中会递增。
+        self.num_tokens = len(self.token_ids)
+        # 固定记录最初 prompt 的长度；靠它区分 prompt 与生成结果。
+        self.num_prompt_tokens = len(token_ids)
+        # 尚没有 token 完成模型计算并成为可用 KV；命中前缀缓存时会直接增加。这个计数表示计算进度，不只是前缀命中的长度。
+        self.num_cached_tokens = 0
+        # 本轮安排送入模型计算的 token 数；调度前是 0，后处理结束后回到 0。
+        self.num_scheduled_tokens = 0
+        # 初始处于 prompt 处理阶段。进入 decode 时调度器会把它改为 False；抢占后可重新变成 True。
+        self.is_prefill = True
+        # 本请求使用的物理 KV 块编号列表，按 token 的逻辑顺序排列。创建时尚未分配块。
+        self.block_table = []
+        # 把温度复制到请求，方便执行器按请求组成采样参数张量。
+        self.temperature = sampling_params.temperature
+        # 把最大生成长度复制到请求，供后处理判断是否结束。
+        self.max_tokens = sampling_params.max_tokens
+        # 把是否忽略 EOS 的设置复制到请求。
+        self.ignore_eos = sampling_params.ignore_eos
+
+    # 让 len(seq) 返回 seq.num_tokens，方便调度器和执行器用普通 Python 长度语法。
+    def __len__(self):
+        return self.num_tokens
+
+    # 让 seq[start:end] 等价于对内部 token_ids 列表切片。执行器准备 prefill 输入时用到它。
+    def __getitem__(self, key):
+        return self.token_ids[key]
+
+    # @property 让调用者写 seq.is_finished；返回状态是否为 FINISHED。这是查询，不改变状态。
+    @property
+    def is_finished(self):
+        return self.status == SequenceStatus.FINISHED
+
+    # 当前总 token 数减去原 prompt 长度，得到已采样的生成 token 数。
+    @property
+    def num_completion_tokens(self):
+        return self.num_tokens - self.num_prompt_tokens
+
+    # 返回从开头到原 prompt 边界的列表切片；生成过程中这部分保持不变。
+    @property
+    def prompt_token_ids(self):
+        return self.token_ids[:self.num_prompt_tokens]
+
+    # 返回原 prompt 边界之后的 token；完成时它就是要解码成输出文本的部分。
+    @property
+    def completion_token_ids(self):
+        return self.token_ids[self.num_prompt_tokens:]
+
+    # 用向上取整公式计算当前序列需要多少 KV 块：(num_tokens + block_size - 1) // block_size。在默认块大小 256 下，长度 256 需要 1 块，长度 257 需要 2 块。
+    @property
+    def num_blocks(self):
+        return (self.num_tokens + self.block_size - 1) // self.block_size
+
+    # 计算最后一个逻辑块当前包含多少 token。例如长度 257、块大小 256 时，最后一块包含 1 个 token。
+    @property
+    def last_block_num_tokens(self):
+        return self.num_tokens - (self.num_blocks - 1) * self.block_size
+
+    # 先确认块序号有效，再返回第 i 块对应的 token ID 切片。这里拿到的是逻辑 token 内容，不是 GPU KV 张量。
+    def block(self, i):
+        assert 0 &lt;= i &lt; self.num_blocks
+        return self.token_ids[i*self.block_size: (i+1)*self.block_size]
+
+    # 把本轮采样结果追加到列表，更新 last_token 和 num_tokens。这一步尚未给新 token 计算 K/V；下一轮 decode 才会使用它。
+    def append_token(self, token_id: int):
+        self.token_ids.append(token_id)
+        self.last_token = token_id
+        self.num_tokens += 1
+
+    # __getstate__ 把多卡 worker 运行所需的长度、缓存进度、块表和 token 状态打包。
+    def __getstate__(self):
+        # Prefill 需要输入 token 列表，因此传完整 token_ids；decode 每个请求只输入最后一个 token，因此只传 last_token。
+        last_state = self.last_token if not self.is_prefill else self.token_ids
+        # 按固定顺序传送总长度、prompt 长度、已缓存数量、本轮计划数量、块表和 token 状态。
+        return (self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state)
+
+    # __setstate__ 从 __getstate__ 的元组恢复 worker 本轮计算需要的请求字段。
+    def __setstate__(self, state):
+        # 把元组的前五项还原到同名字段，第六项放进 last_state。
+        self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state
+        # 若收到完整 token 列表，说明是 prefill，恢复 token_ids 并取最后一个 token。
+        if isinstance(last_state, list):
+            self.token_ids = last_state
+            self.last_token = self.token_ids[-1]
+        # 若只收到一个整数 token，说明 decode 只需要 last_token；此时本地 token_ids 设为空列表。执行器后续不能假设 decode worker 持有完整历史 token。
+        else:
+            self.token_ids = []
+            self.last_token = last_state</code></pre></figure>
+<section id="section-1"><h3>文件职责与对象边界</h3>
+<p>上面是 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py" target="_blank" rel="noopener noreferrer">Nano-vLLM 提交 <code>bb823b3</code> 的完整 <code>sequence.py</code></a>，原有可执行语句保持一致，中文注释解释字段值和每个方法的实际动作。<code>Sequence</code> 在这里代表<strong>一个生成请求</strong>，不是模型的一层，也不只是普通 token 列表。一个 prompt 经 <code>LLMEngine.add_request()</code> 转成 token ID 后，会建立一个 <code>Sequence</code>，再放进调度器的等待队列。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer"><code>add_request()</code></a></p>
+<p>对象内部同时保存三类信息：请求的 token（原 prompt 与后来采样的输出）、请求处在等待/运行/完成哪个状态，以及它已计算的 token 数和物理 KV 块映射。这样调度器传递一个 <code>Sequence</code>，就能获得本轮调度所需的请求状态，而不必把这些数据拆成多个互不关联的列表。</p>
+</section>
+<section id="section-2"><h3>状态、编号与构造参数</h3>
+<p><code>SequenceStatus</code> 用 <code>Enum</code> 定义 <code>WAITING</code>、<code>RUNNING</code>、<code>FINISHED</code> 三种状态；<code>auto()</code> 自动给它们分配枚举值，业务代码应比较成员名而不是依赖数值。<code>Sequence.counter = count()</code> 是类级递增计数器；每次 <code>Sequence.__init__()</code> 调用 <code>next(Sequence.counter)</code>，就得到一个新的 <code>seq_id</code>。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner.warmup_model()</code></a> 也会创建临时 <code>Sequence</code>，所以正式请求的首个 ID 不保证为 0，但其相对创建顺序仍可用于恢复输出顺序。</p>
+<p><code>__init__(token_ids, sampling_params)</code> 中的 <code>token_ids</code> 是一个请求的<strong>非空 prompt ID 列表</strong>。<code>copy(token_ids)</code> 建立新列表，之后 <code>append_token()</code> 追加输出时不会修改调用方原来的列表。<code>last_token = token_ids[-1]</code> 读取末尾项，因此空 prompt 会在这里失败。<code>temperature</code>、<code>max_tokens</code>、<code>ignore_eos</code> 从 <code>SamplingParams</code> 复制到请求，用于之后的采样和结束判断。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/sampling_params.py" target="_blank" rel="noopener noreferrer"><code>SamplingParams</code> 源码</a></p>
+<p><code>block_size</code> 是类属性，默认 256；创建引擎时 <a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py" target="_blank" rel="noopener noreferrer"><code>LLMEngine.__init__()</code></a> 会将它设置为 <code>config.kvcache_block_size</code>。这个值只用于请求自身计算逻辑块边界；真实 GPU KV 张量由 <code>ModelRunner</code> 分配，物理块编号由 <code>BlockManager</code> 管理。</p>
+</section>
+<section id="section-3"><h3>三个 token 计数与生成边界</h3>
+<p><code>num_tokens</code> 初始化为 prompt 长度，此后每调用一次 <code>append_token()</code> 加 1。<code>num_prompt_tokens</code> 固定为最初的 prompt 长度，于是 <code>num_completion_tokens = num_tokens - num_prompt_tokens</code> 给出已采样的输出个数；两个切片属性也以它为边界，分别返回原 prompt 和生成部分。</p>
+<p><code>num_cached_tokens</code> 表示已有多少 token 完成模型计算，其 K/V 可以被后续步骤使用；它包括命中并复用的完整前缀，不只指“命中缓存”的数量。<code>num_scheduled_tokens</code> 则只表示<strong>本轮计划计算</strong>多少 token：<code>Scheduler.schedule()</code> 设置它，<code>Scheduler.postprocess()</code> 在模型运行后把它加到缓存进度，再清零。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer">调度与后处理源码</a></p>
+<figure class="engine-figure"><a href="images/sequence-state.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/sequence-state.svg" alt="Sequence 中 token 列表、已计算 token 数与请求状态在 prompt、prefill 和 decode 后的变化。"></a><figcaption>Sequence 中 token 列表、已计算 token 数与请求状态在 prompt、prefill 和 decode 后的变化。 点击可打开完整图片。</figcaption></figure>
+<p>图是依照 <code>Sequence.append_token()</code> 和调度器后处理顺序构造的两步生成例子。每次新采样的 token 先进入 <code>token_ids</code>；它要到下一轮作为模型输入，才计入已完成 KV 计算的数量。</p>
+<p>三个数可能不同。下面紧贴 <code>append_token()</code> 和 <code>num_completion_tokens</code> 的行为举例：prompt 为 <code>[A,B,C]</code>，完成一次 prefill 并采样出 <code>D</code> 后，<code>token_ids=[A,B,C,D]</code>，<code>num_tokens=4</code>、<code>num_prompt_tokens=3</code>、<code>num_completion_tokens=1</code>，但 <code>num_cached_tokens=3</code>。此时 <code>D</code> 已成为序列中的输出，却还没有作为下一轮模型输入写入 KV；下一轮 decode 才会读取 <code>last_token=D</code>。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner.prepare_decode()</code></a></p>
+</section>
+<section id="section-4"><h3>块数、块切片与调度器接口</h3>
+<p><code>num_blocks</code> 用 <code>(num_tokens + block_size - 1) // block_size</code> 对块数向上取整。若块大小为 256，长度 256 需要 1 个块，长度 257 需要 2 个块。<code>last_block_num_tokens</code> 给出最后一个逻辑块中当前有多少 token；上述长度 257 的例子里，它等于 1。<code>block(i)</code> 返回第 <code>i</code> 个<strong>逻辑块中的 token ID 切片</strong>，因此 <code>BlockManager</code> 能按整块内容计算前缀哈希。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>BlockManager.can_allocate()</code></a></p>
+<p><code>block_table</code> 则不是 token 内容：它按逻辑顺序存放物理 KV 块编号。例如逻辑块 <code>0、1、2</code> 可能映射为物理块 <code>[7,3,11]</code>。<code>Scheduler</code> 让 <code>BlockManager.allocate()</code> 填写这个列表；<code>ModelRunner.prepare_block_tables()</code> 再把多个请求的块表整理成 GPU 可读张量。这个例子是解释性构造，真实编号取决于当时的空闲池。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>prepare_block_tables()</code></a></p>
+<p><code>__len__()</code> 使 <code>len(seq)</code> 直接返回 <code>num_tokens</code>，<code>__getitem__()</code> 使 <code>seq[start:end]</code> 转发到内部 token 列表；<code>@property</code> 则让计算结果能写成 <code>seq.num_blocks</code>、<code>seq.completion_token_ids</code>，读取时像字段一样使用。这些是 Python 的对象接口，底层数据仍然保存在 <code>self.token_ids</code> 等成员中。</p>
+</section>
+<section id="section-5"><h3>跨进程状态传递</h3>
+<p><code>__getstate__()</code> 与 <code>__setstate__()</code> 控制 <code>Sequence</code> 经 Python 序列化时传递哪些字段。多卡执行中，rank 0 通过共享内存把选中的请求交给其他 worker；prefill 需要完整的当前输入 token 列表，所以 <code>__getstate__()</code> 传 <code>self.token_ids</code>。decode 每个请求只计算上次采样出的 <code>last_token</code>，于是传这个整数，减少控制数据量。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/model_runner.py" target="_blank" rel="noopener noreferrer"><code>ModelRunner.write_shm()</code> 与 <code>read_shm()</code></a></p>
+<p><code>__setstate__()</code> 按固定元组顺序恢复长度、缓存进度、块表和最后状态。若最后一项是列表，就恢复 <code>token_ids</code> 并从末尾取 <code>last_token</code>；若是整数，就只保存该 <code>last_token</code>，把 worker 本地 <code>token_ids</code> 置为空列表。这里恢复的是执行器当前计算所需的字段，不是把主进程中的完整请求对象原样复制一份。</p>
+</section>
+<section id="section-6"><h3>手敲代码的核对位置</h3>
+<p>上面的完整代码刻意保留了原版中的 <code>self.num_tokens = len(self.token_ids)</code>、<code>self.num_scheduled_tokens</code> 和 <code>self.last_token = last_state</code>。它们分别决定长度相关属性是否可用、跨进程恢复后调度量的字段名是否一致，以及 decode worker 能否取得正确输入。手敲版若漏掉初始化或拼错名称，文件可能仍能通过 Python 语法检查，却会在第一次访问该字段时出错。核对时应先比较这三处，再用短 token 列表手算 <code>num_blocks</code> 与输出切片。</p>
+</section>
+            <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
+<a href="02-llm-engine.html">上一章：llm_engine.py</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

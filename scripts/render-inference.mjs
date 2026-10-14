@@ -12,13 +12,22 @@ const chapters = [
     description: "Nano-vLLM 项目概览、组件思维导图与源码阅读顺序。",
     deck: "第 1 章 · 项目范围、请求路径与阅读顺序",
     previous: null,
-    next: { href: "02-llm-engine.html", text: "下一章：LLMEngine" },
+    next: { href: "02-llm-engine.html", text: "下一章：llm_engine.py" },
   },
   {
     stem: "02-llm-engine",
-    description: "Nano-vLLM 的 LLMEngine：初始化、请求入队、单轮执行与批量生成。",
-    deck: "第 2 章 · 请求入口与执行循环",
+    sourceFile: "llm_engine.py",
+    description: "llm_engine.py 完整注释代码及初始化、请求入队、单轮执行与批量生成的源码解析。",
+    deck: "第 2 章 · 完整注释代码与执行路径",
     previous: { href: "01-overview.html", text: "上一章：项目概览" },
+    next: { href: "03-sequence.html", text: "下一章：sequence.py" },
+  },
+  {
+    stem: "03-sequence",
+    sourceFile: "sequence.py",
+    description: "sequence.py 完整注释代码及请求状态、token 计数、KV 块视图与跨进程序列化的源码解析。",
+    deck: "第 3 章 · 完整注释代码与请求状态",
+    previous: { href: "02-llm-engine.html", text: "上一章：llm_engine.py" },
     next: null,
   },
 ];
@@ -28,7 +37,7 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
-function renderMarkdown(input) {
+function renderMarkdown(input, sourceFile = "") {
   const prepared = input.trim();
   if (!prepared) return "";
   let html = marked.parse(prepared, { gfm: true });
@@ -36,7 +45,10 @@ function renderMarkdown(input) {
   html = html.replace(/<pre><code(?: class="language-([^"]+)")?>([\s\S]*?)<\/code><\/pre>/g,
     (_, language, content) => {
       const label = language === "python" ? "Python" : language || "Code";
-      return '<figure class="engine-code"><figcaption>代码片段 <span>' +
+      const complete = Boolean(sourceFile) && content.split("\n").length > 70;
+      const className = complete ? "engine-code is-complete" : "engine-code";
+      const caption = complete ? "完整代码 · " + sourceFile : "代码片段";
+      return '<figure class="' + className + '"><figcaption>' + escapeHtml(caption) + ' <span>' +
         escapeHtml(label) + '</span></figcaption><pre><code>' +
         content.trimEnd() + '</code></pre></figure>';
     });
@@ -75,7 +87,7 @@ function renderChapter(chapter) {
     bodyStart: match.index + match[0].length,
     end: index + 1 < matches.length ? matches[index + 1].index : markdown.length,
   }));
-  const intro = renderMarkdown(markdown.slice(0, sections[0].start));
+  const intro = renderMarkdown(markdown.slice(0, sections[0].start), chapter.sourceFile);
   const body = [
     intro,
     ...sections.map((section) => '<section id="' + section.id + '"><h3>' +

@@ -142,20 +142,380 @@
     num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
 <span class="tok-keyword">else</span>:
     num_tokens = seq.num_tokens - seq.num_cached_tokens</code></pre></figure>
-<p><strong>这里要算的是同一个量：这个请求还有多少 token 需要送进模型。</strong> 两个分支使用不同的减数，是因为它们进入时保存的进度不同。<code>block_table</code> 是请求使用的 KV 块编号表；它为空，表示这次还没有建立块映射。新请求第一次处理，以及被抢占后块表被清空，都会走 <code>if</code>。已有块表、但 prompt 尚未处理完的请求，下一轮继续 prefill 时走 <code>else</code>。</p>
+<h4>核心问题：两个分支计算的是同一个量</h4>
+<p><strong>这两个分支都在回答同一个问题：这个请求还有多少 token 需要计算？</strong></p>
+<p>但它们使用不同的减数，是因为请求所处的阶段不同：</p>
+<ul>
+<li><strong><code>if</code> 分支</strong>：第一次分配 KV 块（或被抢占后重新分配）</li>
+<li><strong><code>else</code> 分支</strong>：已有块表，正在进行分块 prefill 的后续轮次</li>
+</ul>
+<h4><code>if</code> 分支：减去共享前缀（来自其他请求）</h4>
+<p><strong>场景：请求 B 首次调度，发现可以复用请求 A 的前缀。</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 请求 A（已处理完成）</span>
+seq_A.token_ids = [<span class="tok-number">101</span>, <span class="tok-number">102</span>, ..., <span class="tok-number">116</span>, <span class="tok-number">117</span>, ...]  <span class="tok-comment"># “你是helpful assistant...”</span>
+seq_A.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>]
+
+<span class="tok-comment"># 块的哈希已登记</span>
+blocks[<span class="tok-number">5</span>].hash = <span class="tok-number">0</span>xAAAA  <span class="tok-comment"># 前 16 个 token</span>
+blocks[<span class="tok-number">6</span>].hash = <span class="tok-number">0</span>xBBBB  <span class="tok-comment"># 前 32 个 token</span>
+hash_to_block_id[<span class="tok-number">0</span>xAAAA] = <span class="tok-number">5</span>
+hash_to_block_id[<span class="tok-number">0</span>xBBBB] = <span class="tok-number">6</span>
+
+<span class="tok-comment"># 请求 B（新请求，前 32 个 token 相同）</span>
+seq_B.token_ids = [<span class="tok-number">101</span>, <span class="tok-number">102</span>, ..., <span class="tok-number">116</span>, <span class="tok-number">200</span>, ...]  <span class="tok-comment"># “你是helpful assistant。翻译...”</span>
+seq_B.num_tokens = <span class="tok-number">64</span>
+seq_B.block_table = []  <span class="tok-comment"># 还没分配！← 进入 if 分支</span></code></pre></figure>
+<p><strong>第一步：查询可复用前缀</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>num_cached_blocks = self.block_manager.can_allocate(seq_B)
+<span class="tok-comment"># 内部逻辑：</span>
+<span class="tok-comment"># - 计算 seq_B 前 16 个 token 的哈希 → 0xAAAA ✓ 找到块 5</span>
+<span class="tok-comment"># - 计算 seq_B 前 32 个 token 的哈希 → 0xBBBB ✓ 找到块 6  </span>
+<span class="tok-comment"># - 计算 seq_B 前 48 个 token 的哈希 → 0xCCCC ✗ 找不到</span>
+<span class="tok-comment"># 返回 num_cached_blocks = 2</span></code></pre></figure>
+<p><strong>第二步：计算需要处理的 token 数</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>num_tokens = seq_B.num_tokens - num_cached_blocks * block_size
+           = <span class="tok-number">64</span> - <span class="tok-number">2</span> * <span class="tok-number">16</span>
+           = <span class="tok-number">64</span> - <span class="tok-number">32</span>
+           = <span class="tok-number">32</span>  <span class="tok-comment"># 需要计算 32 个 token</span></code></pre></figure>
+<p><strong>关键点：此时 <code>seq_B.num_cached_tokens</code> 还是 0！</strong></p>
+<p>因为还没有执行 <code>allocate()</code>，请求 B 的进度还没有更新。不能用 <code>seq_B.num_cached_tokens</code> 来计算，只能用查询结果 <code>num_cached_blocks</code>。</p>
+<p><strong>第三步：关联共享块</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>self.block_manager.allocate(seq_B, num_cached_blocks=<span class="tok-number">2</span>)
+<span class="tok-comment"># 内部执行：</span>
+<span class="tok-comment"># 1. 关联共享前缀块</span>
+seq_B.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, ...]  <span class="tok-comment"># 复用块 5, 6</span>
+blocks[<span class="tok-number">5</span>].ref_count += <span class="tok-number">1</span>  <span class="tok-comment"># A 和 B 共享</span>
+blocks[<span class="tok-number">6</span>].ref_count += <span class="tok-number">1</span>
+
+<span class="tok-comment"># 2. 更新缓存进度</span>
+seq_B.num_cached_tokens = <span class="tok-number">2</span> * <span class="tok-number">16</span> = <span class="tok-number">32</span>
+
+<span class="tok-comment"># 3. 分配新块给剩余部分</span>
+<span class="tok-comment"># ... 后续处理</span></code></pre></figure>
+<h4><code>else</code> 分支：减去累计进度（包含共享前缀 + 已计算部分）</h4>
+<p><strong>场景：请求 B 的 prefill 分成多轮，第二轮继续处理。</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 第一轮 prefill 之后</span>
+seq_B.num_tokens = <span class="tok-number">64</span>
+seq_B.num_cached_tokens = <span class="tok-number">32</span> + <span class="tok-number">20</span> = <span class="tok-number">52</span>
+<span class="tok-comment"># ↑ 32 来自共享前缀，20 是第一轮新计算的</span>
+seq_B.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>]  <span class="tok-comment"># 已有块表！← 进入 else 分支</span></code></pre></figure>
+<p><strong>计算剩余 token：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>num_tokens = seq_B.num_tokens - seq_B.num_cached_tokens
+           = <span class="tok-number">64</span> - <span class="tok-number">52</span>
+           = <span class="tok-number">12</span>  <span class="tok-comment"># 还需计算 12 个 token</span></code></pre></figure>
+<p><strong>为什么不再减共享前缀？</strong></p>
+<p>因为 <code>num_cached_tokens = 52</code> <strong>已经包含了</strong>：</p>
+<ul>
+<li>共享前缀：32 个 token（来自块 5, 6）</li>
+<li>第一轮计算：20 个 token（写入块 7）</li>
+</ul>
+<p>如果再减一次共享前缀，就会<strong>重复扣除</strong>：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># ❌ 错误的做法</span>
+num_tokens = seq_B.num_tokens - num_cached_blocks * block_size - seq_B.num_cached_tokens
+           = <span class="tok-number">64</span> - <span class="tok-number">32</span> - <span class="tok-number">52</span>
+           = -<span class="tok-number">20</span>  <span class="tok-comment"># 错误！负数了</span></code></pre></figure>
 <figure class="engine-figure"><a href="images/scheduler-prefill-counts.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/scheduler-prefill-counts.svg" alt="同一请求在首次分配和下一轮分块 prefill 中的 token 进度：64 个 token 中先复用前缀 32 个，再计算 20 个，最后剩余 12 个。"></a><figcaption>同一请求在首次分配和下一轮分块 prefill 中的 token 进度：64 个 token 中先复用前缀 32 个，再计算 20 个，最后剩余 12 个。 点击可打开完整图片。</figcaption></figure>
-<p>在 <code>if</code> 中，<code>can_allocate(seq)</code> 查出可复用的<strong>完整前缀块数</strong>。例如另一个请求已经算好相同的前 32 个 token，每块 16 个 token，这里得到 <code>num_cached_blocks = 2</code>。当前请求总长 64，于是待计算量是 <code>64 - 2 × 16 = 32</code>。此时尚未执行下方的 <code>allocate()</code>，不能靠当前请求的 <code>num_cached_tokens</code> 得到这 32 个命中 token；代码直接使用查询结果。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>BlockManager.can_allocate()</code></a></p>
-<p>随后，<code>allocate(seq, num_cached_blocks)</code> 把共享前缀块关联到这个请求，并设置 <code>seq.num_cached_tokens = num_cached_blocks * block_size</code>。如果本轮又计算了 20 个 token，<code>postprocess()</code> 会执行 <code>seq.num_cached_tokens += seq.num_scheduled_tokens</code>，将进度从 32 更新到 52。下一轮块表已经存在，<code>else</code> 计算 <code>64 - 52 = 12</code>。<strong>52 已经包含共享前缀 32 和本请求新算的 20</strong>；再单独减一次前缀，就会重复扣除。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>BlockManager.allocate()</code></a>、<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>Scheduler.postprocess()</code></a></p>
-<p>图中的 token 数是解释性示例。图上方对应 <code>if</code>，下方对应 <code>else</code>：变化的是<strong>已经计入进度的范围</strong>，所以减数从“刚查到的前缀长度”变成了“累计已完成长度”。</p>
+<h4>时间线完整示例</h4>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>block_size = <span class="tok-number">16</span>
+
+<span class="tok-comment"># ===== t=0: 请求 B 首次调度 =====</span>
+seq_B.num_tokens = <span class="tok-number">64</span>
+seq_B.num_cached_tokens = <span class="tok-number">0</span>
+seq_B.block_table = []  <span class="tok-comment"># 空 → if 分支</span>
+
+<span class="tok-comment"># can_allocate 查询</span>
+num_cached_blocks = <span class="tok-number">2</span>  <span class="tok-comment"># 可复用 2 个块</span>
+
+<span class="tok-comment"># 计算待处理量</span>
+num_tokens = <span class="tok-number">64</span> - <span class="tok-number">2</span>*<span class="tok-number">16</span> = <span class="tok-number">32</span>
+
+<span class="tok-comment"># 假设本轮只处理 20 个 token</span>
+seq_B.num_scheduled_tokens = <span class="tok-number">20</span>
+
+<span class="tok-comment"># allocate 关联共享块</span>
+seq_B.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>]
+seq_B.num_cached_tokens = <span class="tok-number">32</span>
+
+<span class="tok-comment"># 计算后 postprocess 更新进度</span>
+seq_B.num_cached_tokens += <span class="tok-number">20</span>  <span class="tok-comment"># 32 → 52</span>
+
+
+<span class="tok-comment"># ===== t=1: 请求 B 第二轮调度 =====</span>
+seq_B.num_tokens = <span class="tok-number">64</span>
+seq_B.num_cached_tokens = <span class="tok-number">52</span>
+seq_B.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>]  <span class="tok-comment"># 非空 → else 分支</span>
+
+<span class="tok-comment"># 计算待处理量</span>
+num_tokens = <span class="tok-number">64</span> - <span class="tok-number">52</span> = <span class="tok-number">12</span>
+
+<span class="tok-comment"># 本轮处理完剩余的 12 个</span>
+seq_B.num_scheduled_tokens = <span class="tok-number">12</span>
+
+<span class="tok-comment"># 计算后更新</span>
+seq_B.num_cached_tokens += <span class="tok-number">12</span>  <span class="tok-comment"># 52 → 64</span>
+
+<span class="tok-comment"># prefill 完成！</span></code></pre></figure>
+<h4>前缀缓存的价值</h4>
+<p><strong>不关联共享块的情况（浪费）：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 请求 A</span>
+seq_A.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>, <span class="tok-number">8</span>]
+<span class="tok-comment"># 计算了前 64 个 token 的 KV cache</span>
+
+<span class="tok-comment"># 请求 B（前 32 个相同，但没有复用）</span>
+seq_B.block_table = [<span class="tok-number">9</span>, <span class="tok-number">10</span>, <span class="tok-number">11</span>, <span class="tok-number">12</span>]  <span class="tok-comment"># 分配了新块</span>
+<span class="tok-comment"># 重新计算全部 64 个 token 的 KV cache</span>
+<span class="tok-comment"># 浪费：前 32 个 token 重复计算了</span></code></pre></figure>
+<p><strong>关联共享块的情况（高效）：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 请求 A</span>
+seq_A.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>, <span class="tok-number">8</span>]
+
+<span class="tok-comment"># 请求 B（复用前缀）</span>
+seq_B.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">11</span>, <span class="tok-number">12</span>]  <span class="tok-comment"># 前两个块复用</span>
+<span class="tok-comment">#                    └─┴─共享</span>
+<span class="tok-comment"># 只需计算后 32 个 token 的 KV cache</span>
+<span class="tok-comment"># 节省：50% 的计算量</span></code></pre></figure>
+<p><strong>收益分析：</strong></p>
+<p>假设场景：100 个用户都以 “你是一个helpful assistant” 开始对话（100 tokens）</p>
+<ul>
+<li>不复用：需要存储和计算 100 × 100 = 10,000 tokens 的 KV</li>
+<li>复用：存储 100 tokens（共享）+ 100 × 各自独特部分</li>
+<li>节省：接近 100 倍的显存和计算</li>
+</ul>
+<h4>总结</h4>
+<p><strong>两个分支的本质区别：</strong></p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>分支</th>
+<th>条件</th>
+<th>减数来源</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong><code>if</code></strong></td>
+<td><code>block_table</code> 为空</td>
+<td><code>num_cached_blocks</code>（刚查询到的）</td>
+<td>来自其他请求的共享前缀</td>
+</tr>
+<tr>
+<td><strong><code>else</code></strong></td>
+<td><code>block_table</code> 已存在</td>
+<td><code>num_cached_tokens</code>（累计进度）</td>
+<td>共享前缀 + 本请求已计算部分</td>
+</tr>
+</tbody></table></div>
+<p><strong>设计原则：</strong></p>
+<ul>
+<li><code>if</code> 分支：首次分配时，通过前缀缓存查询减少计算量</li>
+<li><code>else</code> 分支：后续轮次，通过累计进度避免重复扣除</li>
+</ul>
+<p>这个设计巧妙地将<strong>前缀缓存</strong>和<strong>分块 prefill</strong> 两个优化机制融合在一起，既避免了跨请求的重复计算，又支持了单个长请求的渐进式处理。</p>
 </section>
 <section id="section-2"><h3>为什么先用 `popleft()` 把 A 从运行队列取出</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>seq = self.running.popleft()
 <span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
     <span class="tok-keyword">if</span> self.running:
         self.preempt(self.running.pop())</code></pre></figure>
-<p><strong>疑问在于：A 明明还在生成，为什么先从 <code>running</code> 删除它？</strong> 这里的删除是暂时取出一个候选请求，放到局部变量 <code>seq</code>，并非宣告 A 已结束。<code>popleft()</code> 取队头 A；资源不足时，<code>pop()</code> 从余下队列的尾部取抢占对象。两者都是 <code>deque</code> 的两端操作，选择不同端点是为了让当前候选 A 留在手里，让靠后的请求先让出资源。</p>
+<h4>疑问：为什么要&quot;弹出-检查-放回&quot;？</h4>
+<p><strong>表面上看起来很低效：</strong> 先用 <code>popleft()</code> 把请求 A 从队列取出，检查资源，如果可以继续就加入 <code>scheduled_seqs</code>，最后又要放回 <code>running</code>。为什么不直接 <code>seq = self.running[0]</code> 查看队头，需要时再取出？</p>
+<h4>原因 1：<code>deque</code> 的高效操作模式</h4>
+<p><code>deque</code>（双端队列）的设计就是为了高效的两端操作：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># deque 的高效操作（O(1)）</span>
+deque.popleft()   <span class="tok-comment"># 从队头取出</span>
+deque.pop()       <span class="tok-comment"># 从队尾取出</span>
+deque.append()    <span class="tok-comment"># 添加到队尾</span>
+deque.appendleft() <span class="tok-comment"># 添加到队头</span>
+
+<span class="tok-comment"># 不高效的操作（可能 O(n)）</span>
+deque[<span class="tok-number">0</span>]          <span class="tok-comment"># 索引访问（虽然可行，但不是设计初衷）</span></code></pre></figure>
+<p><strong>如果不弹出而是&quot;偷看&quot;：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 方案 A：peek 模式（看起来&quot;节省&quot;，实际更繁琐）</span>
+seq = self.running[<span class="tok-number">0</span>]  <span class="tok-comment"># 只看不取</span>
+
+<span class="tok-keyword">if</span> self.block_manager.can_append(seq):
+    seq = self.running.popleft()  <span class="tok-comment"># 还是要取出</span>
+    <span class="tok-comment"># 处理...</span>
+    scheduled_seqs.append(seq)
+    <span class="tok-comment"># 还要放回... </span>
+<span class="tok-keyword">else</span>:
+    <span class="tok-comment"># 不能继续，需要抢占</span>
+    <span class="tok-comment"># 但 seq 还在队列里，逻辑更复杂</span></code></pre></figure>
+<p><strong>当前方案（直接操作两端）：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 方案 B：pop 模式（符合 deque 设计）✅</span>
+seq = self.running.popleft()  <span class="tok-comment"># 直接取出队头</span>
+
+<span class="tok-keyword">if</span> self.block_manager.can_append(seq):
+    <span class="tok-comment"># 可以继续，加入批次</span>
+    scheduled_seqs.append(seq)
+<span class="tok-keyword">else</span>:
+    <span class="tok-comment"># 不能继续，需要抢占其他请求</span>
+    <span class="tok-comment"># seq 已经在手里，队列中只剩其他请求</span>
+    self.preempt(self.running.pop())  <span class="tok-comment"># 从队尾抢占</span></code></pre></figure>
+<h4>原因 2：简化抢占逻辑</h4>
+<p>这是<strong>关键设计点</strong>：通过先取出 A，让后续的 <code>pop()</code> 操作不会误伤 A。</p>
 <figure class="engine-figure"><a href="images/scheduler-queue-pick.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/scheduler-queue-pick.svg" alt="运行队列从 A、B、C、D 变为 B、C、D：A 暂存在 seq 中，此后 pop 从队尾取出 D。"></a><figcaption>运行队列从 A、B、C、D 变为 B、C、D：A 暂存在 seq 中，此后 pop 从队尾取出 D。 点击可打开完整图片。</figcaption></figure>
-<p>图中 <code>running</code> 原本是 <code>[A, B, C, D]</code>。执行 <code>popleft()</code> 后，<code>seq</code> 指向 A，队列只剩 <code>[B, C, D]</code>；此时 <code>pop()</code> 取出 D，不会误取正在等待块的 A。A 是否能计算，要等 <code>can_append(A)</code> 的检查结果；能计算时，它会进入本轮的 <code>scheduled_seqs</code>。</p>
+<p><strong>完整的操作序列：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 初始状态</span>
+running = [A, B, C, D]  <span class="tok-comment"># A 在队头，D 在队尾</span>
+
+<span class="tok-comment"># 步骤 1：取出队头请求</span>
+seq = self.running.popleft()  <span class="tok-comment"># seq = A</span>
+<span class="tok-comment"># 现在: seq = A, running = [B, C, D]</span>
+
+<span class="tok-comment"># 步骤 2：检查 A 是否能继续</span>
+<span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
+    <span class="tok-comment"># A 需要新块，但没有空闲块</span>
+    
+    <span class="tok-comment"># 步骤 3：从队尾抢占</span>
+    <span class="tok-keyword">if</span> self.running:
+        victim = self.running.pop()  <span class="tok-comment"># victim = D</span>
+        <span class="tok-comment"># 现在: running = [B, C]</span>
+        self.preempt(victim)
+        <span class="tok-comment"># D 被抢占，释放块，running = [B, C]</span>
+    
+    <span class="tok-comment"># 步骤 4：再次检查 A</span>
+    <span class="tok-comment"># 如果 D 释放的块够用，循环结束</span>
+    <span class="tok-comment"># 如果还不够，继续抢占 C, B...</span>
+
+<span class="tok-comment"># 步骤 5：A 获得资源，加入批次</span>
+seq.num_scheduled_tokens = <span class="tok-number">1</span>
+scheduled_seqs.append(seq)  <span class="tok-comment"># scheduled_seqs = [A]</span></code></pre></figure>
+<p><strong>如果不先取出 A，会发生什么？</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># ❌ 错误的实现</span>
+running = [A, B, C, D]
+
+<span class="tok-comment"># 不取出 A，只是&quot;看&quot;</span>
+seq = running[<span class="tok-number">0</span>]  <span class="tok-comment"># seq 指向 A，但 A 还在队列里</span>
+
+<span class="tok-comment"># 检查 A，发现需要抢占</span>
+<span class="tok-keyword">while</span> <span class="tok-keyword">not</span> block_manager.can_append(seq):
+    <span class="tok-comment"># 从队尾取出</span>
+    victim = running.pop()  <span class="tok-comment"># victim = D ✓</span>
+    preempt(victim)
+
+<span class="tok-comment"># 问题：如果需要继续抢占</span>
+<span class="tok-comment"># running = [A, B, C]</span>
+victim = running.pop()  <span class="tok-comment"># victim = C ✓</span>
+
+<span class="tok-comment"># running = [A, B]  </span>
+victim = running.pop()  <span class="tok-comment"># victim = B ✓</span>
+
+<span class="tok-comment"># running = [A]</span>
+victim = running.pop()  <span class="tok-comment"># victim = A ❌ 错误！抢占了正在等待的 A！</span></code></pre></figure>
+<p><strong>通过先取出 A，避免了这个问题：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># ✅ 正确的实现</span>
+running = [A, B, C, D]
+seq = running.popleft()  <span class="tok-comment"># A 被取出，不在队列中</span>
+
+<span class="tok-comment"># 现在: seq = A (局部变量), running = [B, C, D]</span>
+
+<span class="tok-comment"># 即使抢占到队列空了</span>
+running.pop()  <span class="tok-comment"># D</span>
+running.pop()  <span class="tok-comment"># C  </span>
+running.pop()  <span class="tok-comment"># B</span>
+<span class="tok-comment"># running = []，队列空了</span>
+
+<span class="tok-comment"># 此时：</span>
+<span class="tok-keyword">if</span> self.running:
+    self.preempt(self.running.pop())  <span class="tok-comment"># 不会执行，running 空了</span>
+<span class="tok-keyword">else</span>:
+    self.preempt(seq)  <span class="tok-comment"># 只能抢占 A 自己</span>
+    <span class="tok-keyword">break</span></code></pre></figure>
+<h4>原因 3：代码清晰性</h4>
+<p>虽然看起来是&quot;弹出-放回&quot;，但这种模式让代码逻辑更清晰：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 处理每个候选请求的模板：</span>
+<span class="tok-keyword">while</span> self.running <span class="tok-keyword">and</span> <span class="tok-builtin">len</span>(scheduled_seqs) &lt; max_num_seqs:
+    <span class="tok-comment"># 1. 取出候选</span>
+    seq = self.running.popleft()
+    
+    <span class="tok-comment"># 2. 检查资源（可能需要抢占）</span>
+    <span class="tok-keyword">while</span> <span class="tok-keyword">not</span> can_allocate(seq):
+        preempt_others()
+    
+    <span class="tok-comment"># 3. 分配资源</span>
+    allocate(seq)
+    
+    <span class="tok-comment"># 4. 加入批次</span>
+    scheduled_seqs.append(seq)
+
+<span class="tok-comment"># 5. 统一放回（稍后执行）</span>
+self.running.extendleft(reversed(scheduled_seqs))</code></pre></figure>
+<p>这种&quot;取出-处理-放回&quot;的模式：</p>
+<ul>
+<li><strong>职责清晰</strong>：取出时检查，放回时恢复</li>
+<li><strong>状态一致</strong>：<code>scheduled_seqs</code> 和 <code>running</code> 各司其职</li>
+<li><strong>易于理解</strong>：符合&quot;从队列取任务-处理-归位&quot;的直觉</li>
+</ul>
+<h4>性能考虑</h4>
+<p><strong>&quot;弹出-放回&quot;真的低效吗？</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 单次操作的时间复杂度</span>
+popleft()    <span class="tok-comment"># O(1)</span>
+pop()        <span class="tok-comment"># O(1)</span>
+append()     <span class="tok-comment"># O(1)</span>
+extendleft() <span class="tok-comment"># O(k)，k 是插入元素数量</span>
+
+<span class="tok-comment"># 完整循环</span>
+<span class="tok-keyword">for</span> i <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(n):  <span class="tok-comment"># n 个请求</span>
+    popleft()   <span class="tok-comment"># O(1)</span>
+    can_append()  <span class="tok-comment"># O(1) 检查</span>
+    <span class="tok-comment"># ...</span>
+    append(seq)  <span class="tok-comment"># O(1)</span>
+
+extendleft(n)  <span class="tok-comment"># O(n)</span>
+
+<span class="tok-comment"># 总复杂度：O(n)</span></code></pre></figure>
+<p>相比之下，GPU 计算一次 decode 需要 <strong>~500 μs</strong>，而这些队列操作总共只需要 <strong>~1-2 μs</strong>。</p>
+<p><strong>开销占比：&lt; 0.5%，完全可以接受。</strong></p>
+<h4>实际代码流程</h4>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 初始：running = [A, B, C]，每个请求都能继续</span>
+
+<span class="tok-comment"># 第 1 次循环</span>
+seq = running.popleft()  <span class="tok-comment"># seq=A, running=[B,C]</span>
+<span class="tok-comment"># 检查 A → 可以</span>
+scheduled_seqs.append(A)  <span class="tok-comment"># scheduled=[A]</span>
+
+<span class="tok-comment"># 第 2 次循环  </span>
+seq = running.popleft()  <span class="tok-comment"># seq=B, running=[C]</span>
+<span class="tok-comment"># 检查 B → 可以</span>
+scheduled_seqs.append(B)  <span class="tok-comment"># scheduled=[A,B]</span>
+
+<span class="tok-comment"># 达到 max_num_seqs，停止循环</span>
+
+<span class="tok-comment"># 放回</span>
+running = [C]
+scheduled = [A, B]
+reversed(scheduled) = [B, A]
+extendleft([B, A]) → running = [A, B, C]
+<span class="tok-comment"># 顺序恢复！</span></code></pre></figure>
+<h4>总结</h4>
+<p><strong>为什么用 <code>popleft()</code> 而不是 <code>[0]</code> 查看？</strong></p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>原因</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>1. 符合 deque 设计</strong></td>
+<td><code>popleft()</code>/<code>pop()</code> 是 O(1) 高效操作</td>
+</tr>
+<tr>
+<td><strong>2. 简化抢占逻辑</strong></td>
+<td>避免 <code>pop()</code> 误抢占正在等待的请求</td>
+</tr>
+<tr>
+<td><strong>3. 代码清晰</strong></td>
+<td>&quot;取出-处理-放回&quot;模式职责分明</td>
+</tr>
+<tr>
+<td><strong>4. 性能开销低</strong></td>
+<td>&lt; 0.5% 的总时间，可忽略</td>
+</tr>
+</tbody></table></div>
+<p><strong>这不是低效设计，而是符合 deque 数据结构特性的正确用法。</strong> 表面上的&quot;弹出-放回&quot;实际上简化了逻辑，提高了代码的健壮性和可读性。</p>
+<p>这是一个经典的案例：<strong>选择正确的数据结构，然后按照其设计意图使用，往往能写出既简洁又高效的代码。</strong></p>
 </section>
 <section id="section-3"><h3>A 需要新 KV 块时，为什么抢占 D 而不是等它结束</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
@@ -164,10 +524,132 @@
     <span class="tok-keyword">else</span>:
         self.preempt(seq)
         <span class="tok-keyword">break</span></code></pre></figure>
-<p><strong>问题的触发条件</strong>是：A 的下一步需要一个新 KV 块，而空闲池里没有块。<code>can_append(A)</code> 只有在 <code>len(A) % block_size == 1</code> 时才要求空闲块；如果当前块还有空位，空闲池为零也能继续。下面的图假设 A 恰好跨过块边界，B、C、D 正占用其余块，D 的块没有被别人共享。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>BlockManager.can_append()</code></a></p>
+<h4>为什么需要抢占机制？</h4>
+<p><strong>核心问题：Decode 阶段的资源只会越来越紧张。</strong> 当 A 需要新 KV 块但空闲池已空时，如果选择&quot;等待&quot;策略，会面临严重的问题。</p>
+<h4>等待策略的困境</h4>
+<p>假设当前状态：</p>
+<ul>
+<li>请求 A：需要新块才能继续 decode</li>
+<li>请求 B, C, D：正在运行</li>
+</ul>
+<p>如果选择让 A 等待 B、C、D 自然完成：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Code</span></figcaption><pre><code>轮次 1: B, C, D 各生成 1 个 token，A 等待
+轮次 2: B, C, D 各生成 1 个 token，A 等待
+轮次 3: B, C, D 各生成 1 个 token，A 等待
+...
+轮次 N: A 还在等待！</code></pre></figure>
+<p><strong>为什么 A 可能永远等不到资源？</strong></p>
+<ol>
+<li><p><strong>正在运行的请求不会主动释放 KV 块</strong>：B、C、D 只在生成完成时才释放资源，在此之前它们只会占用（甚至申请更多）KV cache 块。</p>
+</li>
+<li><p><strong>资源消耗递增</strong>：每次 decode 生成新 token，可能需要更多 KV 块存储。时刻 T+1 的资源占用通常 ≥ 时刻 T。</p>
+</li>
+<li><p><strong>死锁风险</strong>：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Code</span></figcaption><pre><code>A 等待 B、C、D 释放块
+B 还在生成，不会主动释放
+C 还在生成，不会主动释放  
+D 还在生成，不会主动释放
+→ A 可能永远等不到资源
+→ A 的用户体验极差（完全无响应）</code></pre></figure>
+</li>
+</ol>
+<h4>抢占策略的必要性</h4>
 <figure class="engine-figure"><a href="images/scheduler-preemption.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/scheduler-preemption.svg" alt="A 需要一个新 KV 块但空闲池为零；抢占队尾 D 并释放其独占块后，A 获得该块，D 回到等待队列。"></a><figcaption>A 需要一个新 KV 块但空闲池为零；抢占队尾 D 并释放其独占块后，A 获得该块，D 回到等待队列。 点击可打开完整图片。</figcaption></figure>
-<p>如果只让 A 等待 B、C、D 自然生成到结束，A 可能很久没有下一步输出。B、C、D 仍能生成时，这表现为 A 的长时间等待；如果它们也都需要新块且无人能释放块，计算就无法继续。代码优先抢占队尾 D：<code>preempt(D)</code> 使 D 回到 <code>waiting</code>，<code>deallocate(D)</code> 解除 D 对 KV 块的引用；若释放出空闲块，下一次 <code>can_append(A)</code> 就能通过。若 D 的块还被别的请求共享，抢占一次可能没有空闲块，所以这里用 <code>while</code> 继续检查和抢占。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/scheduler.py" target="_blank" rel="noopener noreferrer"><code>preempt()</code></a>、<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/block_manager.py" target="_blank" rel="noopener noreferrer"><code>deallocate()</code></a></p>
-<p>抢占使 D 的块表和已缓存进度清零；D 下次要从 prefill 路径恢复。完整块若仍能从前缀缓存命中，可免去部分重算，否则会增加计算量。这里牺牲 D 的当前进度，换取 A 尽快继续生成。如果连 A 自己也只能被抢占，且本轮没有其他请求成功入选，后面的 <code>assert scheduled_seqs</code> 会报错；这份代码没有覆盖这种极端容量情况。</p>
+<p>代码采用<strong>主动抢占</strong>而非被动等待：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># 持续检查和抢占，直到 A 获得所需资源</span>
+<span class="tok-keyword">while</span> <span class="tok-keyword">not</span> self.block_manager.can_append(seq):
+    <span class="tok-keyword">if</span> self.running:
+        <span class="tok-comment"># 从队尾抢占最新进入的请求</span>
+        self.preempt(self.running.pop())
+    <span class="tok-keyword">else</span>:
+        <span class="tok-comment"># 队列空了，只能抢占 A 自己</span>
+        self.preempt(seq)
+        <span class="tok-keyword">break</span></code></pre></figure>
+<p><strong>为什么从队尾抢占？</strong> 基于 FIFO 公平性原则：</p>
+<ul>
+<li>队头请求（如 A）等待时间最长，优先级最高</li>
+<li>队尾请求（如 D）最近才进来，抢占它影响最小</li>
+<li>被抢占的请求会放回 <code>waiting</code> 队头，资源空出来后优先恢复</li>
+</ul>
+<h4>抢占的代价与权衡</h4>
+<p>虽然抢占会带来额外开销，但这是保证系统可用性的必要代价。</p>
+<h4>抢占的成本</h4>
+<p>当 D 被抢占时：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">def</span> preempt(self, seq):
+    seq.status = SequenceStatus.WAITING
+    seq.is_prefill = <span class="tok-constant">True</span>  <span class="tok-comment"># 下次需要重新 prefill</span>
+    self.block_manager.deallocate(seq)  <span class="tok-comment"># 释放 KV 块，清空块表</span>
+    self.waiting.appendleft(seq)  <span class="tok-comment"># 放回等待队列前端</span></code></pre></figure>
+<p>D 的状态变化：</p>
+<ul>
+<li><strong>块表清空</strong>：<code>seq.block_table = []</code></li>
+<li><strong>进度清零</strong>：<code>seq.num_cached_tokens = 0</code>  </li>
+<li><strong>需要重新 prefill</strong>：下次调度时重新计算 KV cache</li>
+</ul>
+<p><strong>开销分析：</strong></p>
+<p>假设 D 被抢占时已生成 50 个 token（prompt 100 + 已生成 50 = 150 tokens）</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Code</span></figcaption><pre><code>恢复时的计算成本：
+- 最好情况（高前缀命中率）：
+  如果 prompt 的 100 个 token 能命中前缀缓存
+  只需重算已生成的 50 个 token
+  开销 = 50 tokens 的 prefill 计算
+
+- 最坏情况（无前缀命中）：
+  需要重算全部 150 个 token
+  开销 = 150 tokens 的 prefill 计算</code></pre></figure>
+<p><strong>相对成本：</strong></p>
+<ul>
+<li>1 次 decode：计算 1 个 token</li>
+<li>重新 prefill 150 tokens：相当于 150 次 decode 的计算量</li>
+</ul>
+<h4>权衡分析：为什么仍然值得抢占</h4>
+<p>尽管抢占有重算成本，但不抢占的代价更大：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>策略</th>
+<th>优点</th>
+<th>缺点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>等待</strong></td>
+<td>无重算开销</td>
+<td>• A 可能饥饿<br>• 资源越等越紧<br>• 用户体验极差<br>• 可能死锁</td>
+</tr>
+<tr>
+<td><strong>抢占</strong></td>
+<td>• 保证进度<br>• 公平性<br>• 避免饥饿</td>
+<td>• D 需要重算<br>• 增加计算量</td>
+</tr>
+</tbody></table></div>
+<p><strong>核心原则：</strong></p>
+<figure class="engine-code"><figcaption>代码片段 <span>Code</span></figcaption><pre><code>正确性和可用性 &gt; 计算效率
+
+宁可让所有用户都慢一点，
+也不能让某些用户完全卡死。</code></pre></figure>
+<p>实际场景中：</p>
+<ul>
+<li>前缀缓存可以显著降低重算成本（可能降低 50-80%）</li>
+<li>抢占频率不高（只在资源真正不足时触发）</li>
+<li>避免饥饿带来的用户体验提升远超重算的成本</li>
+</ul>
+<h4>共享块的处理</h4>
+<p>如果 D 的某个 KV 块被其他请求共享：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-comment"># D 的块表</span>
+seq_D.block_table = [<span class="tok-number">5</span>, <span class="tok-number">6</span>, <span class="tok-number">7</span>]
+
+<span class="tok-comment"># 假设块 5 和 6 也被请求 E 使用</span>
+blocks[<span class="tok-number">5</span>].ref_count = <span class="tok-number">2</span>  <span class="tok-comment"># D 和 E 共享</span>
+blocks[<span class="tok-number">6</span>].ref_count = <span class="tok-number">2</span>  <span class="tok-comment"># D 和 E 共享</span>
+blocks[<span class="tok-number">7</span>].ref_count = <span class="tok-number">1</span>  <span class="tok-comment"># D 独占</span>
+
+<span class="tok-comment"># 抢占 D 后：</span>
+blocks[<span class="tok-number">5</span>].ref_count = <span class="tok-number">1</span>  <span class="tok-comment"># E 还在用，不释放</span>
+blocks[<span class="tok-number">6</span>].ref_count = <span class="tok-number">1</span>  <span class="tok-comment"># E 还在用，不释放</span>
+blocks[<span class="tok-number">7</span>].ref_count = <span class="tok-number">0</span>  <span class="tok-comment"># 释放，进入空闲池</span></code></pre></figure>
+<p><strong>这就是为什么用 <code>while</code> 循环：</strong> 一次抢占可能只释放部分块，需要继续抢占直到获得足够资源。</p>
+<p>这个设计体现了 LLM 推理系统中<strong>资源管理</strong>和<strong>用户体验</strong>之间的精妙平衡：通过主动的资源调度，确保所有请求都能稳定推进，而不是让部分请求因资源竞争而完全停滞。</p>
 </section>
 <section id="section-4"><h3>选中 A、B 后，为什么又把它们放回 `running`</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>seq.num_scheduled_tokens = <span class="tok-number">1</span>

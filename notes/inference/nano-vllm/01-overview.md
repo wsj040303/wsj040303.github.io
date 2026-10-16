@@ -40,7 +40,7 @@ Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 
 1. [`example.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py) 和 [`llm_engine.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/llm_engine.py)：找到对外入口、请求何时入队，以及一次 `step()` 的调用顺序。下一章详细解释这一段。
 2. [`sequence.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)：确认请求状态怎样随 prefill、decode 和完成而变化；本站[第 3 章](03-sequence.html)给出完整注释代码。
 3. [`scheduler.py`](04-scheduler.html) 与 [`block_manager.py`](05-block-manager.html)：解释本轮选择和 KV 资源约束。第 4 章分析块不足时的抢占与调度队列；第 5 章分析引用计数、前缀哈希与块边界。
-4. [`model_runner.py`](06-model-runner.html)：追踪请求怎样变成 GPU 输入；第 6 章着重解释执行模式、默认设备、各 rank 的消息循环、显存预留与 CUDA Graph 档位。
+4. [`model_runner.py`](06-model-runner.html)：追踪请求怎样变成 GPU 输入；第 6 章着重解释执行模式、各 rank 的消息循环、显存预留与 CUDA Graph 的加速和档位取舍。
 5. [`context.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/utils/context.py)、[`attention.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py) 和 [`qwen3.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py)：理解本轮元数据、KV 写入和模型前向。初读时先看输入输出，随后再追具体算子。
 6. [`bench.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/bench.py)：核对现有基准的请求分布和计时范围，再设计自己需要的在线负载。
 

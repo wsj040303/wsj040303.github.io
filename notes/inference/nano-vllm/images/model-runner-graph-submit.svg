@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc"><title id="title">CUDA Graph 如何减少提交开销</title><desc id="desc">Eager 由CPU逐项提交GPU操作，Graph通过一次图启动重放已捕获工作；计算仍执行。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="484" rx="24" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136">减少的是重复提交开销，模型计算仍然执行</text>
+<text x="48" y="95" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b">示意图只比较提交方式，不表示耗时比例。</text>
+<rect x="48" y="130" width="300" height="130" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="166" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136">Eager：CPU 每轮逐项提交</text>
+<text x="68" y="202" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136">框架调度、参数准备、启动</text>
+<text x="68" y="234" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136">操作 1 → 操作 2 → 操作 3</text>
+<path d="M358 151 L492 142" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="505" y="120" width="260" height="44" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="525" y="150" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 1</text>
+<path d="M358 191 L492 198" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="505" y="176" width="260" height="44" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="525" y="206" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 2</text>
+<path d="M358 231 L492 254" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="505" y="232" width="260" height="44" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="525" y="262" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 3</text>
+<text x="820" y="176" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136">GPU 接收陆续提交的工作</text>
+<text x="820" y="209" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b">小操作可能等待 CPU 提交</text>
+<rect x="48" y="335" width="300" height="76" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="367" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136">Graph：CPU 启动整张图</text>
+<text x="68" y="396" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="500" fill="#1b5136">graph.replay()</text>
+<path d="M358 373 L430 373" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="445" y="311" width="706" height="116" rx="12" fill="#f3f6ec" stroke="#b5cfab" stroke-width="2"/>
+<text x="464" y="338" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136">已捕获的操作与依赖关系</text>
+<rect x="467" y="356" width="180" height="48" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="484" y="387" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 1</text>
+<path d="M653 380 L683 380" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="692" y="356" width="180" height="48" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="709" y="387" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 2</text>
+<path d="M878 380 L908 380" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="917" y="356" width="180" height="48" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="934" y="387" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136">GPU 操作 3</text>
+<text x="48" y="470" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="550" fill="#1b5136">同样的输入仍要完成这些 GPU 计算；收益来自减少每轮的 CPU 调度与提交工作。</text>
+</svg>

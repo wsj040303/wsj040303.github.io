@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 488" role="img" aria-labelledby="title desc"><title id="title">跨越档位边界的补齐浪费</title><desc id="desc">16请求用16档无补齐；17请求用32档补15行；31请求用32档补1行；32请求无补齐。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="472" rx="24" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136">只多 1 个请求，使用的档位从 16 跳到 32</text>
+<text x="48" y="94" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b">示例假设已捕获 16、32 两档；每格代表图批次中的一行。</text>
+<rect x="740" y="78" width="20" height="20" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="768" y="94" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="500" fill="#1b5136">真实请求</text>
+<rect x="905" y="78" width="20" height="20" rx="12" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="933" y="94" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="500" fill="#1b5136">补齐占位</text>
+<text x="48" y="167" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="650" fill="#1b5136">bs = 16 → 16 档</text>
+<rect x="265" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="289" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="313" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="337" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="361" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="385" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="409" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="433" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="457" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="481" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="505" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="529" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="553" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="577" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="601" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="625" y="137" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1050" y="166" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136">补 0 行</text>
+<text x="48" y="239" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="650" fill="#1b5136">bs = 17 → 32 档</text>
+<rect x="265" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="289" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="313" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="337" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="361" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="385" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="409" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="433" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="457" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="481" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="505" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="529" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="553" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="577" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="601" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="625" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="649" y="209" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="673" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="697" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="721" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="745" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="769" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="793" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="817" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="841" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="865" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="889" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="913" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="937" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="961" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="985" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="1009" y="209" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="1050" y="238" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136">补 15 行</text>
+<text x="48" y="311" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="650" fill="#1b5136">bs = 31 → 32 档</text>
+<rect x="265" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="289" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="313" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="337" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="361" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="385" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="409" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="433" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="457" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="481" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="505" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="529" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="553" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="577" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="601" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="625" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="649" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="673" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="697" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="721" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="745" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="769" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="793" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="817" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="841" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="865" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="889" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="913" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="937" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="961" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="985" y="281" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="1009" y="281" width="20" height="42" rx="4" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="1050" y="310" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136">补 1 行</text>
+<text x="48" y="383" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="650" fill="#1b5136">bs = 32 → 32 档</text>
+<rect x="265" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="289" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="313" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="337" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="361" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="385" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="409" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="433" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="457" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="481" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="505" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="529" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="553" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="577" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="601" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="625" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="649" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="673" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="697" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="721" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="745" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="769" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="793" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="817" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="841" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="865" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="889" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="913" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="937" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="961" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="985" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="1009" y="353" width="20" height="42" rx="4" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1050" y="382" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136">补 0 行</text>
+<text x="48" y="456" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136">17 → 32：15 / 32 = 46.9% 行用于补齐；31 → 32：仅 1 / 32 = 3.1%。</text>
+</svg>

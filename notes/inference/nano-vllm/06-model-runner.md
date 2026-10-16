@@ -310,36 +310,7 @@ if is_prefill or self.enforce_eager or input_ids.size(0) > 512:
 
 ![初始化是否捕获图与运行时是否重放图是两次判断；本实现的 prefill、强制 eager 和超过 512 的 batch 走直接执行路径。](images/model-runner-execution-mode.svg)
 
-eager 路径每轮都会执行这段 Python 前向调用，便于在模型中加打印、断点或查看报错位置。Graph 路径则先记录可重放的 GPU 工作，后续从已有缓冲区读取本轮数据执行它。重放主要减少 CPU 逐算子调度和提交工作的开销；图内 Python 代码不会在每次重放时重新执行。[PyTorch CUDA Graph 说明](https://docs.pytorch.org/docs/2.14/notes/cuda.html#cuda-graphs)
-
-**本文件捕获的范围是 `self.model(...)` 及其输出写入。** `compute_logits()` 在重放后读取有效隐藏状态计算 logits，采样器再选 token，二者都在这次手工捕获范围之外。因此代码中的“Graph 模式”仍有输入准备、复制、输出头和采样工作。这里对 prefill 使用 eager 是当前实现的选择；不能由此推导 CUDA Graph 普遍无法处理 prefill。具体加速幅度取决于模型、batch 和硬件，不能把固定微秒数或百分比当成本实现的保证。
-
-## 初始化时切到 CUDA，结束时切回 CPU，会把模型搬回去吗
-
-```python
-torch.cuda.set_device(rank)
-default_dtype = torch.get_default_dtype()
-torch.set_default_dtype(hf_config.dtype)
-torch.set_default_device("cuda")
-self.model = Qwen3ForCausalLM(hf_config)
-```
-
-```python
-torch.set_default_device("cpu")
-torch.set_default_dtype(default_dtype)
-```
-
-**这里改变的是后续新张量的默认创建位置，已经存在的张量不会随这两行迁移。** `set_device(rank)` 先选中当前进程负责的 GPU；随后默认设备设为 `"cuda"`，让没有显式 `device` 的模型参数、KV Cache 和 Graph 缓冲区创建在这张 GPU 上。结束初始化时设回 CPU，影响的是之后的新分配。[`torch.set_default_device`](https://docs.pytorch.org/docs/2.14/generated/torch.set_default_device.html)
-
-![默认设备从 CUDA 初始化阶段切回 CPU 后，模型、KV Cache 和图缓冲仍在 GPU；prepare_* 创建 CPU 输入张量并显式复制到 GPU。](images/model-runner-default-device.svg)
-
-这能解释 `prepare_prefill()` 中下面的语句：先在 CPU 创建页锁定输入张量，再显式通过 `.cuda(non_blocking=True)` 送到 GPU。它不会因为构造函数结尾设了 CPU 就在 CPU 上运行模型。
-
-```python
-input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-```
-
-默认 dtype 和默认设备的恢复方式也不同：dtype 先通过 `get_default_dtype()` 保存，再恢复该值；设备没有保存进入函数前的值，源码结尾明确设为 `"cpu"`。所以准确的描述是“把默认设备设回 CPU”，而不是“总能恢复调用者原先的设备设置”。
+eager 路径每轮都会执行 Python 前向调用，便于在模型中加打印、断点或查看报错位置。Graph 路径会重放预先捕获的 GPU 工作；图内的 Python 代码不会在每次重放时重新执行。因此调试模型计算过程时，可以先用 `enforce_eager=True`。
 
 ## 为什么非 rank 0 进程停在 loop()，rank 0 却继续运行
 
@@ -409,72 +380,68 @@ KV 预算 = total × gpu_memory_utilization - used - (peak - current)
 
 这里估计的是预热负载下的临时增量。实际输入、其他进程占用以及后续 CUDA Graph 捕获都会影响显存需求；“不超过目标预算”也不同于“绝不会发生显存不足”。尤其本文件先分配 KV Cache，再捕获图，不能把 `peak-current` 当成已经测过所有 Graph 档位的额外占用。
 
-## CUDA Graph 怎样捕获、选择档位并复用固定地址
+## CUDA Graph 是什么、如何加速，以及固定档位的代价
 
-### 为什么只捕获一组 batch 档位
-
-```python
-max_bs = min(self.config.max_num_seqs, 512)
-```
+### 1. CUDA Graph 是什么
 
 ```python
-self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))
-self.graphs = {}
-self.graph_pool = None
-```
-
-**实际请求数每轮可能不同，而一次捕获对应一组固定的张量形状，代码怎样把两者对接起来？** 本实现用少量已捕获 batch 形状覆盖多个实际 batch：小档位是 1、2、4、8，之后按 16 递增。`max_bs=256` 时有 20 档，`max_bs=512` 时有 36 档。减少档位会减少初始化时的捕获工作与图对象数量，但不代表显存按某个固定“每图 MB”线性减少。
-
-```python
-bs = input_ids.size(0)
-context = get_context()
-graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
-```
-
-`next(...)` 从按升序排列的档位中选第一个不小于实际 `bs` 的值。比如实际有 5 个请求，选择 8；实际有 17 个请求，选择 32。这里每轮选择一个图，不把多个小图拼成一个 batch。`bs>512` 由 `run_model()` 直接送入 eager 分支；512 是这份实现选择的图上限。
-
-![实际 batch 为 5 时选择 8 档，前 5 行存真实请求，后 3 行补齐；重放后只读取前 5 行输出。](images/model-runner-graph-buckets.svg)
-
-这段档位生成式还有一个具体边界：若自行把 `max_num_seqs` 设为 20，列表只生成到 16，实际 `bs=17` 时 `next(...)` 找不到候选，会触发 `StopIteration`。因此解释这份源码时，要同时看生成的档位列表，不能仅凭 `bs≤512` 就认定一定有可用图。
-
-### 捕获保存什么，为什么要一直持有缓冲区
-
-```python
-for bs in reversed(self.graph_bs):
-    graph = torch.cuda.CUDAGraph()
-    set_context(False, slot_mapping=slot_mapping[:bs], context_lens=context_lens[:bs], block_tables=block_tables[:bs])
+with torch.cuda.graph(graph, self.graph_pool):
     outputs[:bs] = self.model(input_ids[:bs], positions[:bs])
-    with torch.cuda.graph(graph, self.graph_pool):
-        outputs[:bs] = self.model(input_ids[:bs], positions[:bs])
-    if self.graph_pool is None:
-        self.graph_pool = graph.pool()
-    self.graphs[bs] = graph
-    torch.cuda.synchronize()
-    reset_context()
 ```
 
-`capture_cudagraph()` 先创建最大 batch 尺寸的 `input_ids`、`positions`、槽位、上下文长度、块表和 `outputs`。对每个档位，它先运行一次模型预热，再在 `torch.cuda.graph(...)` 内捕获模型前向及输出写入。`reversed(self.graph_bs)` 使大档位先捕获；首次取得 `graph.pool()`，之后的捕获传入同一个池句柄，以便复用分配空间。
+**CUDA Graph 是一份可以重复执行的 GPU 工作图。** 图中的节点代表 GPU 操作，连线表示操作之间的依赖关系。在这里，`torch.cuda.graph(...)` 把模型前向涉及的 GPU 操作、执行依赖及其使用的内存地址记录下来，这个过程叫作**捕获**。之后调用 `graph.replay()`，就可以按记录重新运行这批工作。
 
-![初始化时创建固定 GPU 输入输出缓冲，捕获图并保存句柄；运行时向同一地址写入新数据，重放后从同一输出缓冲读取结果。](images/model-runner-graph-buffers.svg)
+每轮输入仍然可以不同：先把新 token 等数据写进图所使用的输入缓冲区，再重放。模型会根据新数据重新计算，所以捕获的是执行过程，不是提前算好的答案。本文件捕获 `self.model(...)` 和输出写入；后面的 `compute_logits()` 与 token 采样位于这次捕获范围之外。[PyTorch CUDA Graph 说明](https://docs.pytorch.org/docs/2.14/notes/cuda.html#cuda-graphs)
 
-`self.graphs` 在程序中持有图对象，`self.graph_pool` 保存池句柄，`self.graph_vars` 持有输入输出张量引用。重放依赖捕获时使用的 GPU 地址；保留缓冲区，才能持续将新内容写到这些地址。图对象和句柄不是一整块 GPU 数据，不能把它们简单描述为“整张图都常驻显存”。本实现也没有将图保存到磁盘后恢复的路径。[PyTorch 图内存与共享池说明](https://docs.pytorch.org/docs/2.14/notes/cuda.html#graph-memory-management)
-
-这些档位共用缓冲区，源码按轮次选择一个执行。共享池减少重复分配的机会，但实际显存还受各档位的算子分配行为影响；不能据此断言固定节省多少倍，更不能直接并发重放到同一组输入输出地址。
-
-### bs=5 重放 8 档时，多出来的三行如何处理
+### 2. 它为什么能加速
 
 ```python
-graph_vars["input_ids"][:bs] = input_ids
-graph_vars["positions"][:bs] = positions
-graph_vars["slot_mapping"].fill_(-1)
-graph_vars["slot_mapping"][:bs] = context.slot_mapping
-graph_vars["context_lens"].zero_()
-graph_vars["context_lens"][:bs] = context.context_lens
-graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
 graph.replay()
 return self.model.compute_logits(graph_vars["outputs"][:bs])
 ```
 
-前五行填入本轮真实请求；剩余行的 `slot_mapping` 保持 -1，`context_lens` 保持 0。Attention 的 KV 写入 kernel 遇到槽位 -1 会跳过写入；模型重放后，`outputs[:bs]` 只取前五行计算 logits。输入 token 与位置缓冲的补齐行可能保留旧值，判断有效行依靠这些元数据和最终切片。[KV 写入 kernel](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py)
+**主要节省的是 CPU 反复向 GPU 提交工作的开销。** 普通 eager 执行时，CPU 每轮都要经过框架调度，把模型中的 GPU 操作陆续提交出去。如果每个操作本身很短，GPU 就可能花时间等下一项工作到来。Graph 把已捕获的操作作为一组工作提交，减少重复的调度、参数准备和启动开销。
 
-8 行中有 3 行用于补齐，占图批次的 37.5%；相对于真实 5 行，行数增加 60%。这两个比例描述的是行数，不能直接当成耗时增加比例。收益来自减少 CPU 提交开销，代价包括补齐行的计算、输入复制、捕获时间和缓冲区占用。kernel 一般批量处理请求，启动次数并不等于 batch size，所以也不能用“5 个请求 × 每次启动耗时”推算 eager 延迟。是否更快，需要用相同模型和请求负载测量。
+![eager 每轮陆续提交多个 GPU 操作；CUDA Graph 捕获后，通过一次图启动提交已记录的工作，GPU 仍执行其中的计算。](images/model-runner-graph-submit.svg)
+
+decode 每轮为每个请求处理一个 token，小 batch 时更容易受到这类提交开销影响，因此本实现用 Graph 优化 decode。重放仍然要执行模型计算，也仍有输入复制、图外输出头和采样等工作；当主要时间已经花在 GPU 计算上时，省去提交开销带来的收益就会相对小一些。
+
+### 3. 固定大小为什么会占显存、造成补齐浪费
+
+```python
+input_ids = torch.zeros(max_bs, dtype=torch.int64)
+positions = torch.zeros(max_bs, dtype=torch.int64)
+slot_mapping = torch.zeros(max_bs, dtype=torch.int32)
+context_lens = torch.zeros(max_bs, dtype=torch.int32)
+block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32)
+outputs = torch.zeros(max_bs, hf_config.hidden_size)
+```
+
+**这份实现的每张图按提前确定的 batch 大小捕获，重放时沿用相同的张量形状和地址。** 因此，输入、输出及捕获期间使用的中间缓冲区需要在图被持续复用期间保持有效，会占用显存。上面的代码先按 `max_bs` 分配输入输出缓冲；后续不同档位还共用 `graph_pool` 来减少重复分配，但共享池并不能消除这部分常驻占用。[PyTorch 图内存管理](https://docs.pytorch.org/docs/2.14/notes/cuda.html#graph-memory-management)
+
+如果为每一种 batch 大小都准备图，就会增加捕获工作、图对象和相关资源的管理成本。本实现因此只准备一组档位：
+
+```python
+self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))
+```
+
+这些档位是 `1、2、4、8、16、32、48……`。运行时，实际请求数 `bs` 不一定正好等于某个档位，下面这行就选择**第一个大于等于实际请求数的档位**：
+
+```python
+graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
+```
+
+假设已经捕获了 16 和 32 两档，实际有 16 个请求时正好使用 16 档；只多来一个请求，变成 17 个，16 档就装不下了，必须升到 32 档。这时图按 32 行运行，只有前 17 行对应真实请求，剩余 15 行需要补齐。实际有 31 个请求时仍用 32 档，却只补齐 1 行。
+
+![16 个请求正好使用 16 档；17 个请求必须使用 32 档，补齐 15 行；31 个请求使用 32 档只补齐 1 行。](images/model-runner-graph-boundary.svg)
+
+| 实际请求数 bs | 使用档位 | 补齐行数 | 补齐行占图批次的比例 |
+| --- | --- | --- | --- |
+| 16 | 16 | 0 | 0% |
+| 17 | 32 | 15 | 46.9% |
+| 31 | 32 | 1 | 3.1% |
+| 32 | 32 | 0 | 0% |
+
+**在同一档位区间里，刚超过前一个档位时，补齐浪费最大；越接近当前档位上限，补齐越少。** 对 16 到 32 这段而言，17 个请求就是最明显的边界情况。源码把补齐行的 KV 写入槽位设为 -1、上下文长度设为 0，最终只取 `outputs[:bs]`，但模型仍有按较大形状执行的额外工作。表格描述的是补齐行的比例，不等于延迟增加比例。
+
+这就形成了档位设计的取舍：档位密一些，可以减少补齐计算，却需要捕获和维护更多图；档位稀一些，捕获数量更少，但刚跨过档位边界时会多算很多行。Graph 带来的提交加速，需要与常驻显存和补齐开销一起考虑。

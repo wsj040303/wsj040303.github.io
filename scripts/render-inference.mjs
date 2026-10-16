@@ -49,7 +49,7 @@ const chapters = [
   {
     stem: "06-model-runner",
     sourceFile: "model_runner.py",
-    description: "model_runner.py 完整注释代码及执行模式、默认设备、进程消息、KV 显存预算与 CUDA Graph 档位的源码解析。",
+    description: "model_runner.py 完整注释代码及执行模式、进程消息、KV 显存预算与 CUDA Graph 的加速和档位取舍的源码解析。",
     deck: "第 6 章 · 完整注释代码与模型执行",
     previous: { href: "05-block-manager.html", text: "上一章：block_manager.py" },
     next: null,

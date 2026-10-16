@@ -444,7 +444,8 @@ outputs = torch.zeros(max_bs, hf_config.hidden_size)</code></pre></figure>
 <p>这就形成了档位设计的取舍：档位密一些，可以减少补齐计算，却需要捕获和维护更多图；档位稀一些，捕获数量更少，但刚跨过档位边界时会多算很多行。Graph 带来的提交加速，需要与常驻显存和补齐开销一起考虑。</p>
 </section>
             <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
-<a href="05-block-manager.html">上一章：block_manager.py</a></div>
+<a href="05-block-manager.html">上一章：block_manager.py</a>
+<a href="07-qwen3.html">下一章：qwen3.py</a></div>
           </article>
         </div>
       </main>

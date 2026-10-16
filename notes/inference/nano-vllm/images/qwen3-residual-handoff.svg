@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 487" role="img" aria-labelledby="title desc"><title id="title">两条张量路径的残差传递</title><desc id="desc">Attention后得到y等于x加a，MLP输出m与y分开返回，下一层输入归一化或模型最终归一化完成m加y。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="471" rx="24" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="48" y="58" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="750" fill="#1b5136" text-anchor="start">层末尾传出两个张量，下一处 RMSNorm 完成相加</text>
+<text x="48" y="94" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="450" fill="#52705b" text-anchor="start">数学关系保持为：y = x + Attention(norm(x))；z = y + MLP(norm(y))。</text>
+<rect x="48" y="129" width="320" height="190" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="65" y="168" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="start">① 本层 Attention</text>
+<text x="65" y="208" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">a = Attention(norm₁(x))</text>
+<text x="65" y="246" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">保存本层输入 x</text>
+<text x="65" y="280" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">Attention 输出为 a</text>
+<rect x="440" y="129" width="320" height="190" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="457" y="168" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="start">② Attention 后的 RMSNorm</text>
+<text x="457" y="208" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">y = x + a</text>
+<text x="457" y="246" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">向 MLP 传 norm₂(y)</text>
+<text x="457" y="280" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">保留 residual = y</text>
+<rect x="832" y="129" width="320" height="190" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="849" y="168" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="start">③ 本层 MLP 与返回值</text>
+<text x="849" y="208" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">m = MLP(norm₂(y))</text>
+<text x="849" y="246" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">hidden_states = m</text>
+<text x="849" y="280" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">residual = y</text>
+<path d="M377 224 L427 224" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M769 224 L819 224" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="48" y="363" width="1104" height="92" rx="13" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="70" y="401" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136" text-anchor="start">下一层 input_layernorm(m, y)：先算 z = m + y，再返回 norm₁(z) 和 residual = z。</text>
+<text x="70" y="434" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="500" fill="#1b5136" text-anchor="start">若已经是最后一层，由 Qwen3Model 末尾的 self.norm(m, y) 完成这次加法。</text>
+</svg>

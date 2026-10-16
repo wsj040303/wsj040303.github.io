@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 416" role="img" aria-labelledby="title desc"><title id="title">注意力头展平与输出投影</title><desc id="desc">N个token的16个128维注意力头合并成2048维特征，再输出投影到hidden_size1024。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="400" rx="24" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="48" y="58" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">flatten 合并的是头与头维度，token 这一维不变</text>
+<text x="48" y="95" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">单卡示例：16 个 Q 头，每头 128 维，hidden_size = 1024。</text>
+<rect x="48" y="130" width="320" height="150" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="169" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700" fill="#1b5136" text-anchor="start">Attention 输出</text>
+<text x="66" y="215" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="700" fill="#1b5136" text-anchor="start">[N, 16, 128]</text>
+<text x="66" y="252" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136" text-anchor="start">每个 token 的 16 份头输出</text>
+<rect x="440" y="130" width="320" height="150" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="458" y="169" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700" fill="#1b5136" text-anchor="start">flatten(1, -1)</text>
+<text x="458" y="215" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="700" fill="#1b5136" text-anchor="start">[N, 2048]</text>
+<text x="458" y="252" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136" text-anchor="start">同一 token 的头特征拼成一行</text>
+<rect x="832" y="130" width="320" height="150" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="850" y="169" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700" fill="#1b5136" text-anchor="start">o_proj 输出</text>
+<text x="850" y="215" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="700" fill="#1b5136" text-anchor="start">[N, 1024]</text>
+<text x="850" y="252" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136" text-anchor="start">权重形状：[1024, 2048]</text>
+<path d="M376 204 L427 204" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M768 204 L819 204" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="48" y="317" width="1104" height="66" rx="13" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="70" y="359" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">匹配条件是最后一维 = in_features；线性层也可以接收最后一维匹配的高维输入。</text>
+</svg>

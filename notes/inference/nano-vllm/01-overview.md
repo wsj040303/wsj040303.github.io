@@ -1,6 +1,6 @@
 # Nano-vLLM 项目概览与源码阅读路径
 
-Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 [Nano-vLLM 提交 `bb823b3`](https://github.com/GeeeekExplorer/nano-vllm/tree/bb823b3e06983d71485a8e1f23715ebd87d98ef8) 为阅读基准，沿着一次请求的运行路径理解请求状态、调度、KV Cache 和模型执行。第一章建立组件关系；第二至六章依次阅读请求入口、请求状态、调度器、KV 块管理器和模型执行器。
+Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 [Nano-vLLM 提交 `bb823b3`](https://github.com/GeeeekExplorer/nano-vllm/tree/bb823b3e06983d71485a8e1f23715ebd87d98ef8) 为阅读基准，沿着一次请求的运行路径理解请求状态、调度、KV Cache 和模型执行。第一章建立组件关系；第二至七章依次阅读请求入口、请求状态、调度器、KV 块管理器、模型执行器和 Qwen3 模型结构。
 
 ## 项目定位与阅读范围
 
@@ -41,7 +41,7 @@ Nano-vLLM 是一个体量较小的语言模型推理引擎实现。本系列以 
 2. [`sequence.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/engine/sequence.py)：确认请求状态怎样随 prefill、decode 和完成而变化；本站[第 3 章](03-sequence.html)给出完整注释代码。
 3. [`scheduler.py`](04-scheduler.html) 与 [`block_manager.py`](05-block-manager.html)：解释本轮选择和 KV 资源约束。第 4 章分析块不足时的抢占与调度队列；第 5 章分析引用计数、前缀哈希与块边界。
 4. [`model_runner.py`](06-model-runner.html)：追踪请求怎样变成 GPU 输入；第 6 章着重解释执行模式、各 rank 的消息循环、显存预留与 CUDA Graph 的加速和档位取舍。
-5. [`context.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/utils/context.py)、[`attention.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py) 和 [`qwen3.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py)：理解本轮元数据、KV 写入和模型前向。初读时先看输入输出，随后再追具体算子。
+5. [`context.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/utils/context.py)、[`attention.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/attention.py) 和 [`qwen3.py`](07-qwen3.html)：理解本轮元数据、KV 写入和模型前向。第 7 章解释注意力头展平、残差跨层传递，以及合并权重的加载方式。
 6. [`bench.py`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/bench.py)：核对现有基准的请求分布和计时范围，再设计自己需要的在线负载。
 
 ## 本系列的验证边界

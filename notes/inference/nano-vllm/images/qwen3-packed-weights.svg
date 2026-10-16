@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 614" role="img" aria-labelledby="title desc"><title id="title">QKV与gate-up权重拼接</title><desc id="desc">QKV的三个独立权重按输出行装入4096乘1024合并参数；gate和up装入6144乘1024合并参数。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="598" rx="24" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="48" y="58" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">加载时按输出行拼接，前向时一次投影后拆开</text>
+<text x="48" y="96" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="450" fill="#52705b" text-anchor="start">单卡假设：hidden_size=1024，Q/KV 头数=16/8，head_dim=128，MLP 中间维度=3072。</text>
+<text x="48" y="135" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">QKV 投影权重</text>
+<text x="642" y="135" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">gate / up 投影权重</text>
+<rect x="48" y="157" width="510" height="46" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="188" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">q_proj.weight  [2048, 1024]</text>
+<rect x="48" y="214" width="510" height="46" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="245" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">k_proj.weight  [1024, 1024]</text>
+<rect x="48" y="271" width="510" height="46" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="302" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">v_proj.weight  [1024, 1024]</text>
+<rect x="642" y="157" width="510" height="64" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="662" y="197" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">gate_proj.weight  [3072, 1024]</text>
+<rect x="642" y="242" width="510" height="64" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="662" y="282" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">up_proj.weight  [3072, 1024]</text>
+<path d="M303 325 L303 356" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M897 325 L897 356" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="48" y="388" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">qkv_proj.weight  [4096, 1024]</text>
+<text x="642" y="388" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="start">gate_up_proj.weight  [6144, 1024]</text>
+<rect x="48" y="411" width="510" height="56" rx="0" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="446.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">Q：行 0:2048</text>
+<rect x="48" y="467" width="510" height="32" rx="0" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="490.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">K：行 2048:3072</text>
+<rect x="48" y="499" width="510" height="32" rx="0" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="522.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">V：行 3072:4096</text>
+<rect x="642" y="411" width="510" height="60" rx="0" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="660" y="448.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">Gate：行 0:3072</text>
+<rect x="642" y="471" width="510" height="60" rx="0" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="660" y="508.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">Up：行 3072:6144</text>
+<text x="48" y="578" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="550" fill="#1b5136" text-anchor="start">权重的列数保持 1024；这里拼接权重的行，相应地把输出特征拼到最后一维。</text>
+</svg>

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Nano-vLLM 解读：项目概览及请求入口、状态、调度、KV 块管理、model_runner.py 模型执行的完整注释代码和源码解析。">
+    <meta name="description" content="Nano-vLLM 解读：项目概览及请求入口、状态、调度、KV 块管理、model_runner.py 模型执行和 qwen3.py 模型结构的完整注释代码和源码解析。">
     <meta name="theme-color" content="#0b2015">
     <title>Nano-vLLM 解读 · WSJ</title>
     <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
@@ -37,6 +37,7 @@
             <li><a class="directory-link" href="04-scheduler.html"><strong>04 · scheduler.py: 选择每轮请求并管理 KV 块资源</strong><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
             <li><a class="directory-link" href="05-block-manager.html"><strong>05 · block_manager.py: 管理物理 KV 块与前缀缓存</strong><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
             <li><a class="directory-link" href="06-model-runner.html"><strong>06 · model_runner.py: 模型执行与 CUDA Graph 优化</strong><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
+            <li><a class="directory-link" href="07-qwen3.html"><strong>07 · qwen3.py: 组织注意力、残差连接与合并投影</strong><span class="directory-arrow" aria-hidden="true">↗</span></a></li>
           </ul>
         </div>
       </main>

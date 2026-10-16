@@ -52,6 +52,14 @@ const chapters = [
     description: "model_runner.py 完整注释代码及执行模式、进程消息、KV 显存预算与 CUDA Graph 的加速和档位取舍的源码解析。",
     deck: "第 6 章 · 完整注释代码与模型执行",
     previous: { href: "05-block-manager.html", text: "上一章：block_manager.py" },
+    next: { href: "07-qwen3.html", text: "下一章：qwen3.py" },
+  },
+  {
+    stem: "07-qwen3",
+    sourceFile: "qwen3.py",
+    description: "qwen3.py 完整注释代码及注意力头展平、残差传递、QKV 与 gate/up 合并权重加载的源码解析。",
+    deck: "第 7 章 · 完整注释代码与 Qwen3 模型结构",
+    previous: { href: "06-model-runner.html", text: "上一章：model_runner.py" },
     next: null,
   },
 ];

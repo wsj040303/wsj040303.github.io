@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc"><title id="title">运行模式选择</title><desc id="desc">初始化决定是否捕获，run_model 决定使用 eager 或已捕获的 decode 图；输出头和采样在手工捕获范围外。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="504" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">初始化捕获与每轮执行：两次判断</text>
+<text x="48" y="93" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="450" fill="#52705b" text-anchor="start">本实现的 Graph 只覆盖模型前向与隐藏状态写入。</text>
+<rect x="48" y="122" width="1104" height="58" rx="13" fill="#f3f6ec" stroke="#b5cfab" stroke-width="2"/>
+<text x="68" y="159" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600" fill="#1b5136" text-anchor="start">初始化：enforce_eager=False → capture_cudagraph()；True → 跳过捕获</text>
+<rect x="48" y="232" width="224" height="132" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="267" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">run_model()</text>
+<text x="66" y="302" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">读取本轮阶段</text>
+<text x="66" y="331" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">读取实际 batch</text>
+<rect x="337" y="202" width="405" height="132" rx="13" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="355" y="237" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">直接执行 eager</text>
+<text x="355" y="272" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">prefill / enforce_eager=True</text>
+<text x="355" y="301" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">或 bs &gt; 512</text>
+<rect x="337" y="356" width="405" height="132" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="355" y="391" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">选择图并 replay</text>
+<text x="355" y="426" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">decode 且走 Graph 分支</text>
+<text x="355" y="455" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">需要已有档位覆盖实际 bs</text>
+<rect x="807" y="278" width="345" height="145" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="825" y="313" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">两条路径都接到</text>
+<text x="825" y="348" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">compute_logits()</text>
+<text x="825" y="377" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">rank 0 采样；这些在图外</text>
+<path d="M281 277 L324 260" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M281 322 L324 396" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M753 266 L794 311" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M753 412 L794 380" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+</svg>

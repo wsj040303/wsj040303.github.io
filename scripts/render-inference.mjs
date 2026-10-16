@@ -44,6 +44,14 @@ const chapters = [
     description: "block_manager.py 完整注释代码及引用计数、前缀哈希和 KV 块边界的源码解析。",
     deck: "第 5 章 · 完整注释代码与 KV 块管理",
     previous: { href: "04-scheduler.html", text: "上一章：scheduler.py" },
+    next: { href: "06-model-runner.html", text: "下一章：model_runner.py" },
+  },
+  {
+    stem: "06-model-runner",
+    sourceFile: "model_runner.py",
+    description: "model_runner.py 完整注释代码及执行模式、默认设备、进程消息、KV 显存预算与 CUDA Graph 档位的源码解析。",
+    deck: "第 6 章 · 完整注释代码与模型执行",
+    previous: { href: "05-block-manager.html", text: "上一章：block_manager.py" },
     next: null,
   },
 ];

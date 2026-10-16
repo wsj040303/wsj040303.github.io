@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 459" role="img" aria-labelledby="title desc"><title id="title">Graph 捕获与重放缓冲</title><desc id="desc">初始化预分配GPU缓冲并保存图和池句柄，后续每轮写入同一地址重放并读取有效输出。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="443" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="750" fill="#1b5136" text-anchor="start">地址保持有效，每轮替换缓冲区里的内容</text>
+<rect x="48" y="106" width="320" height="220" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="141" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">初始化与捕获</text>
+<text x="66" y="176" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">创建 input / context / outputs</text>
+<text x="66" y="205" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">每个档位先 warmup，再 capture</text>
+<text x="66" y="234" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">self.graphs 保存图对象</text>
+<text x="66" y="263" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">self.graph_pool 保存池句柄</text>
+<rect x="440" y="106" width="320" height="220" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="458" y="141" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">GPU 固定缓冲区</text>
+<text x="458" y="176" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">input_ids / positions</text>
+<text x="458" y="205" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">slot_mapping / context_lens</text>
+<text x="458" y="234" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">block_tables / outputs</text>
+<text x="458" y="263" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">self.graph_vars 持有引用</text>
+<rect x="832" y="106" width="320" height="220" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="850" y="141" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">每轮 run_model()</text>
+<text x="850" y="176" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">① 写入新输入与元数据</text>
+<text x="850" y="205" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">② graph.replay()</text>
+<text x="850" y="234" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">③ 取 outputs[:bs]</text>
+<text x="850" y="263" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">④ 图外计算 logits 并采样</text>
+<path d="M378 218 L427 218" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M770 218 L819 218" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="48" y="366" width="1104" height="62" rx="13" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="71" y="405" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">保留的是重放所需的资源与 GPU 地址；本实现使用共享缓冲区，按轮次选择一个图执行。</text>
+</svg>

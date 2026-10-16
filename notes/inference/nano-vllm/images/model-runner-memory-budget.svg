@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 487" role="img" aria-labelledby="title desc"><title id="title">显存预算拆分</title><desc id="desc">正确预留下当前占用18加临时增量2加KV预算1.6正好为21.6GiB；不预留临时增量则预计23.6GiB超过目标预算。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="471" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="750" fill="#1b5136" text-anchor="start">为什么 KV 预算要额外扣掉 peak − current？</text>
+<text x="48" y="96" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">假设总显存 24 GiB；目标比例 0.9；used = current = 18 GiB；peak = 20 GiB。</text>
+<text x="48" y="143" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="start">预留临时增量：18 + 2 + 1.6 = 21.6 GiB</text>
+<rect x="90" y="165" width="720" height="62" rx="0" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<rect x="810" y="165" width="80" height="62" rx="0" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<rect x="890" y="165" width="64" height="62" rx="0" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="954" y="165" width="96" height="62" rx="0" fill="#f0f0e7" stroke="#b5cfab" stroke-width="2"/>
+<text x="450" y="204" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="650" fill="#1b5136" text-anchor="middle">当前占用 18</text>
+<text x="850" y="204" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="650" fill="#1b5136" text-anchor="middle">2</text>
+<text x="922" y="204" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="middle">1.6</text>
+<text x="1002" y="204" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="550" fill="#1b5136" text-anchor="middle">2.4</text>
+<text x="795" y="254" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="500" fill="#1b5136" text-anchor="start">临时增量</text>
+<text x="891" y="281" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="500" fill="#1b5136" text-anchor="start">KV 预算</text>
+<text x="977" y="254" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#1b5136" text-anchor="start">预算外余量</text>
+<text x="48" y="332" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="start">未预留临时增量：18 + 3.6 + 2 = 23.6 GiB</text>
+<rect x="90" y="350" width="720" height="62" rx="0" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<rect x="810" y="350" width="144" height="62" rx="0" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<rect x="954" y="350" width="80" height="62" rx="0" fill="#f5d8ce" stroke="#b5cfab" stroke-width="2"/>
+<rect x="1034" y="350" width="16" height="62" rx="0" fill="#f0f0e7" stroke="#b5cfab" stroke-width="2"/>
+<text x="450" y="389" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="650" fill="#1b5136" text-anchor="middle">当前占用 18</text>
+<text x="882" y="389" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="middle">KV 3.6</text>
+<text x="994" y="389" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="650" fill="#1b5136" text-anchor="middle">2</text>
+<path d="M954 155 V424" fill="none" stroke="#9d5f39" stroke-width="2.5" stroke-dasharray="7 5"/>
+<text x="48" y="455" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="550" fill="#1b5136" text-anchor="start">虚线是 21.6 GiB 目标预算；下方多出的 2 GiB 超过该预算，但还未超过 24 GiB 物理总量。</text>
+</svg>

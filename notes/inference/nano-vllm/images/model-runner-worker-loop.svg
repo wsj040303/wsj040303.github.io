@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 511" role="img" aria-labelledby="title desc"><title id="title">rank 消息循环</title><desc id="desc">rank 0 把方法名和参数写入 CPU 共享内存并唤醒其他 rank；各 GPU 通过 NCCL 配合计算，采样结果仅由 rank 0 返回引擎。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1184" height="495" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="48" y="57" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="750" fill="#1b5136" text-anchor="start">控制指令走共享内存，模型张量通信走 NCCL</text>
+<rect x="48" y="99" width="335" height="130" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="66" y="134" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">rank 0 所在进程</text>
+<text x="66" y="169" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">LLMEngine / Scheduler</text>
+<text x="66" y="198" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">call(&quot;run&quot;, seqs, is_prefill)</text>
+<rect x="450" y="99" width="315" height="130" rx="13" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="468" y="134" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">CPU 共享内存</text>
+<text x="468" y="169" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">前 4 字节：消息长度</text>
+<text x="468" y="198" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">其余：方法名与参数</text>
+<rect x="830" y="99" width="322" height="130" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="848" y="134" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="start">rank 1（其他 worker 同理）</text>
+<text x="848" y="169" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">Event.wait() → read_shm()</text>
+<text x="848" y="198" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#456550" text-anchor="start">loop() → call(&quot;run&quot;, ...)</text>
+<path d="M389 165 L437 165" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M772 165 L817 165" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="452" y="260" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="530" fill="#1b5136" text-anchor="start">write_shm() 写好消息，再 event.set() 唤醒 worker</text>
+<rect x="70" y="300" width="290" height="73" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="215" y="345" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">GPU 0：执行模型</text>
+<rect x="850" y="300" width="280" height="73" rx="13" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="990" y="345" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">GPU 1：执行模型</text>
+<path d="M215 237 L215 287" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M990 237 L990 287" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M375 337 L830 337" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M830 354 L375 354" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="600" y="320" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="middle">NCCL 张量通信</text>
+<rect x="70" y="411" width="400" height="64" rx="13" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="89" y="451" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="650" fill="#1b5136" text-anchor="start">rank 0 采样 → token IDs → 引擎</text>
+<rect x="760" y="411" width="370" height="64" rx="13" fill="#f3f6ec" stroke="#b5cfab" stroke-width="2"/>
+<text x="778" y="451" font-family="Inter, Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="550" fill="#1b5136" text-anchor="start">worker 返回值由 loop() 丢弃</text>
+<path d="M215 378 L215 399" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M990 378 L990 399" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+</svg>

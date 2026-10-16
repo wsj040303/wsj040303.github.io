@@ -256,6 +256,65 @@ class Qwen3ForCausalLM(nn.Module):
         return self.lm_head(hidden_states)
 ```
 
+
+## qwen3.py 对应怎样的 Qwen3 模型结构
+
+`qwen3.py` 定义了模型中有哪些模块，以及它们怎样连接、按什么顺序计算。这里实现的是 **Qwen3 稠密模型（Dense）**：每层有一个注意力模块和一个普通门控 MLP。Qwen3 系列还包含 MoE 模型，其前馈部分需要专家与路由机制；下面的图对应本文件的 Dense 路径。官方技术报告确认这一结构采用前置 RMSNorm、GQA、RoPE、SwiGLU，并加入 QK-Norm、移除 QKV 投影偏置。[Qwen3 技术报告：Architecture](https://arxiv.org/html/2505.09388v1#S2)
+
+### 整体结构：从 token ID 到词表分数
+
+```python
+self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
+self.layers = nn.ModuleList([Qwen3DecoderLayer(config) for _ in range(config.num_hidden_layers)])
+self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+```
+
+这三行创建 `Qwen3Model` 的主体：token ID 先经 Embedding 变成隐藏向量，然后依次经过 `config.num_hidden_layers` 个解码层，最后经过 RMSNorm。图左侧展示整条路径，右侧展开其中一个解码层，箭头从上往下表示计算方向。
+
+![依据 Nano-vLLM 源码与 Qwen3 官方资料自绘：左侧是 Dense 模型整体，右侧展开一个 Decoder Layer。残差加法按数学等价结构表示；token 采样在模型之外。](images/qwen3-dense-architecture.svg)
+
+`Qwen3ForCausalLM` 持有 `Qwen3Model` 和 `lm_head`。在这份实现里，`forward()` 返回最终隐藏状态，`compute_logits()` 再调用 LM Head 得到词表分数；`ModelRunner` 随后调用采样器选出下一个 token。因此图中的采样节点画在模型外。各层具体使用的线性、RMSNorm、RoPE 和 Attention 算子，则由 `nanovllm/layers/` 下的模块实现。
+
+单个 Decoder Layer 包含两段计算：先做 `RMSNorm → Attention → 残差相加`，再做 `RMSNorm → MLP → 残差相加`。这两次相加决定了模型的数学结构；实际代码将 MLP 后的加法延至下一处 RMSNorm，并把 `hidden_states` 与 `residual` 分开返回，后面的残差小节会逐行解释这一点。
+
+### 单层内部：Q、K、V 和 SwiGLU 如何计算
+
+```python
+if not self.qkv_bias:
+    q = self.q_norm(q)
+    k = self.k_norm(k)
+q, k = self.rotary_emb(positions, q, k)
+o = self.attn(q, k, v)
+output = self.o_proj(o.flatten(1, -1))
+return output
+```
+
+Attention 内部先用 `qkv_proj` 一次生成 Q、K、V，再拆成各自的头。图按官方 `attention_bias=False` 的配置绘制：Q 和 K 先做按头的 RMSNorm，再通过旋转位置编码 RoPE 加入位置信息；V 保持投影结果。分组查询注意力 GQA 让多个 Q 头共享同一组 K/V，并在因果约束下读取当前位置及其之前的内容。输出合并各 Q 头后，经 `o_proj` 回到隐藏维度。
+
+![Qwen3-0.6B 单卡尺寸下的层内展开：Attention 展示 QKV 投影、QK-Norm、RoPE、因果 GQA 与输出投影；MLP 展示 gate/up、SiLU 乘法门控和 down_proj。](images/qwen3-layer-internals.svg)
+
+图中的 QK-Norm 使用 `RMSNorm(head_dim)`，作用于每个头；整体图中 Attention 和 MLP 之前的两处 RMSNorm 使用 `hidden_size`，作用于隐藏向量。它们在结构中的位置与归一化维度不同。
+
+```python
+gate_up = self.gate_up_proj(x)
+x = self.act_fn(gate_up)
+x = self.down_proj(x)
+return x
+```
+
+右侧 MLP 的 `gate_up_proj` 同时生成 gate 和 up 两条分支。`SiluAndMul` 将 gate 经过 SiLU，再与 up 逐元素相乘，这就是这里的 SwiGLU 门控；`down_proj` 最后把中间维度映射回 `hidden_size`。两张图因此可以直接对应 `Qwen3Model`、`Qwen3DecoderLayer`、`Qwen3Attention`、`Qwen3MLP` 和 `Qwen3ForCausalLM` 五个类。[Nano-vLLM 的 Qwen3 实现](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py)、[SiluAndMul](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/activation.py)
+
+图中具体尺寸取自官方 Qwen3-0.6B 配置，且按单卡展示；切换模型或张量并行度后应重新代入配置，结构中的 L、头数和宽度并非全系列固定值。[Qwen3-0.6B config.json](https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/config.json)
+
+| 配置项 | Qwen3-0.6B 的值 | 在图中的位置 |
+| --- | --- | --- |
+| `num_hidden_layers` | 28 | 整体图的 Decoder Layer 重复次数 L |
+| `hidden_size` | 1024 | Embedding 与每层输入输出的宽度 |
+| `num_attention_heads / num_key_value_heads` | 16 / 8 | GQA 中每 2 个 Q 头共享一组 K/V |
+| `head_dim` | 128 | 单个 Q/K/V 头的宽度 |
+| `intermediate_size` | 3072 | gate、up 和门控乘法后的宽度 |
+| `tie_word_embeddings` | true | 此配置的 Embedding 与 LM Head 共享权重 |
+
 ## Attention 输出为什么先 flatten，再交给 o_proj
 
 ```python

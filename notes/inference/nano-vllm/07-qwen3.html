@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="qwen3.py 完整注释代码及注意力头展平、残差传递、QKV 与 gate/up 合并权重加载的源码解析。">
+    <meta name="description" content="qwen3.py 完整注释代码、Qwen3 Dense 整体与单层结构图，以及注意力展平、残差传递和合并权重加载的源码解析。">
     <meta name="theme-color" content="#0b2015">
     <title>qwen3.py: 组织注意力、残差连接与合并投影 · WSJ</title>
     <link rel="stylesheet" href="../../../assets/site.css?v=20261008-layout">
@@ -32,9 +32,10 @@
           <aside class="chapter-sidebar">
             <details class="chapter-panel" open><summary>本文章节</summary>
               <nav aria-label="本文章节目录"><ol class="chapter-list">
-<li><a href="#section-1">Attention 输出为什么先 flatten，再交给 o_proj</a></li>
-<li><a href="#section-2">residual 为什么跨层更新，为什么每层返回两个张量</a></li>
-<li><a href="#section-3">packed_modules_mapping 怎样把分离权重装进合并投影</a></li>
+<li><a href="#section-1">qwen3.py 对应怎样的 Qwen3 模型结构</a></li>
+<li><a href="#section-2">Attention 输出为什么先 flatten，再交给 o_proj</a></li>
+<li><a href="#section-3">residual 为什么跨层更新，为什么每层返回两个张量</a></li>
+<li><a href="#section-4">packed_modules_mapping 怎样把分离权重装进合并投影</a></li>
               </ol></nav>
             </details>
           </aside>
@@ -292,7 +293,74 @@
         hidden_states: torch.Tensor,
     ) -&gt; torch.Tensor:
         <span class="tok-keyword">return</span> self.lm_head(hidden_states)</code></pre></figure>
-<section id="section-1"><h3>Attention 输出为什么先 flatten，再交给 o_proj</h3>
+<section id="section-1"><h3>qwen3.py 对应怎样的 Qwen3 模型结构</h3>
+<p><code>qwen3.py</code> 定义了模型中有哪些模块，以及它们怎样连接、按什么顺序计算。这里实现的是 <strong>Qwen3 稠密模型（Dense）</strong>：每层有一个注意力模块和一个普通门控 MLP。Qwen3 系列还包含 MoE 模型，其前馈部分需要专家与路由机制；下面的图对应本文件的 Dense 路径。官方技术报告确认这一结构采用前置 RMSNorm、GQA、RoPE、SwiGLU，并加入 QK-Norm、移除 QKV 投影偏置。<a class="inline-link" href="https://arxiv.org/html/2505.09388v1#S2" target="_blank" rel="noopener noreferrer">Qwen3 技术报告：Architecture</a></p>
+<h4>整体结构：从 token ID 到词表分数</h4>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
+self.layers = nn.ModuleList([Qwen3DecoderLayer(config) <span class="tok-keyword">for</span> _ <span class="tok-keyword">in</span> <span class="tok-builtin">range</span>(config.num_hidden_layers)])
+self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)</code></pre></figure>
+<p>这三行创建 <code>Qwen3Model</code> 的主体：token ID 先经 Embedding 变成隐藏向量，然后依次经过 <code>config.num_hidden_layers</code> 个解码层，最后经过 RMSNorm。图左侧展示整条路径，右侧展开其中一个解码层，箭头从上往下表示计算方向。</p>
+<figure class="engine-figure"><a href="images/qwen3-dense-architecture.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/qwen3-dense-architecture.svg" alt="依据 Nano-vLLM 源码与 Qwen3 官方资料自绘：左侧是 Dense 模型整体，右侧展开一个 Decoder Layer。残差加法按数学等价结构表示；token 采样在模型之外。"></a><figcaption>依据 Nano-vLLM 源码与 Qwen3 官方资料自绘：左侧是 Dense 模型整体，右侧展开一个 Decoder Layer。残差加法按数学等价结构表示；token 采样在模型之外。 点击可打开完整图片。</figcaption></figure>
+<p><code>Qwen3ForCausalLM</code> 持有 <code>Qwen3Model</code> 和 <code>lm_head</code>。在这份实现里，<code>forward()</code> 返回最终隐藏状态，<code>compute_logits()</code> 再调用 LM Head 得到词表分数；<code>ModelRunner</code> 随后调用采样器选出下一个 token。因此图中的采样节点画在模型外。各层具体使用的线性、RMSNorm、RoPE 和 Attention 算子，则由 <code>nanovllm/layers/</code> 下的模块实现。</p>
+<p>单个 Decoder Layer 包含两段计算：先做 <code>RMSNorm → Attention → 残差相加</code>，再做 <code>RMSNorm → MLP → 残差相加</code>。这两次相加决定了模型的数学结构；实际代码将 MLP 后的加法延至下一处 RMSNorm，并把 <code>hidden_states</code> 与 <code>residual</code> 分开返回，后面的残差小节会逐行解释这一点。</p>
+<h4>单层内部：Q、K、V 和 SwiGLU 如何计算</h4>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">if</span> <span class="tok-keyword">not</span> self.qkv_bias:
+    q = self.q_norm(q)
+    k = self.k_norm(k)
+q, k = self.rotary_emb(positions, q, k)
+o = self.attn(q, k, v)
+output = self.o_proj(o.flatten(<span class="tok-number">1</span>, -<span class="tok-number">1</span>))
+<span class="tok-keyword">return</span> output</code></pre></figure>
+<p>Attention 内部先用 <code>qkv_proj</code> 一次生成 Q、K、V，再拆成各自的头。图按官方 <code>attention_bias=False</code> 的配置绘制：Q 和 K 先做按头的 RMSNorm，再通过旋转位置编码 RoPE 加入位置信息；V 保持投影结果。分组查询注意力 GQA 让多个 Q 头共享同一组 K/V，并在因果约束下读取当前位置及其之前的内容。输出合并各 Q 头后，经 <code>o_proj</code> 回到隐藏维度。</p>
+<figure class="engine-figure"><a href="images/qwen3-layer-internals.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/qwen3-layer-internals.svg" alt="Qwen3-0.6B 单卡尺寸下的层内展开：Attention 展示 QKV 投影、QK-Norm、RoPE、因果 GQA 与输出投影；MLP 展示 gate/up、SiLU 乘法门控和 down_proj。"></a><figcaption>Qwen3-0.6B 单卡尺寸下的层内展开：Attention 展示 QKV 投影、QK-Norm、RoPE、因果 GQA 与输出投影；MLP 展示 gate/up、SiLU 乘法门控和 down_proj。 点击可打开完整图片。</figcaption></figure>
+<p>图中的 QK-Norm 使用 <code>RMSNorm(head_dim)</code>，作用于每个头；整体图中 Attention 和 MLP 之前的两处 RMSNorm 使用 <code>hidden_size</code>，作用于隐藏向量。它们在结构中的位置与归一化维度不同。</p>
+<figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>gate_up = self.gate_up_proj(x)
+x = self.act_fn(gate_up)
+x = self.down_proj(x)
+<span class="tok-keyword">return</span> x</code></pre></figure>
+<p>右侧 MLP 的 <code>gate_up_proj</code> 同时生成 gate 和 up 两条分支。<code>SiluAndMul</code> 将 gate 经过 SiLU，再与 up 逐元素相乘，这就是这里的 SwiGLU 门控；<code>down_proj</code> 最后把中间维度映射回 <code>hidden_size</code>。两张图因此可以直接对应 <code>Qwen3Model</code>、<code>Qwen3DecoderLayer</code>、<code>Qwen3Attention</code>、<code>Qwen3MLP</code> 和 <code>Qwen3ForCausalLM</code> 五个类。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/models/qwen3.py" target="_blank" rel="noopener noreferrer">Nano-vLLM 的 Qwen3 实现</a>、<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/activation.py" target="_blank" rel="noopener noreferrer">SiluAndMul</a></p>
+<p>图中具体尺寸取自官方 Qwen3-0.6B 配置，且按单卡展示；切换模型或张量并行度后应重新代入配置，结构中的 L、头数和宽度并非全系列固定值。<a class="inline-link" href="https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/config.json" target="_blank" rel="noopener noreferrer">Qwen3-0.6B config.json</a></p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>配置项</th>
+<th>Qwen3-0.6B 的值</th>
+<th>在图中的位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>num_hidden_layers</code></td>
+<td>28</td>
+<td>整体图的 Decoder Layer 重复次数 L</td>
+</tr>
+<tr>
+<td><code>hidden_size</code></td>
+<td>1024</td>
+<td>Embedding 与每层输入输出的宽度</td>
+</tr>
+<tr>
+<td><code>num_attention_heads / num_key_value_heads</code></td>
+<td>16 / 8</td>
+<td>GQA 中每 2 个 Q 头共享一组 K/V</td>
+</tr>
+<tr>
+<td><code>head_dim</code></td>
+<td>128</td>
+<td>单个 Q/K/V 头的宽度</td>
+</tr>
+<tr>
+<td><code>intermediate_size</code></td>
+<td>3072</td>
+<td>gate、up 和门控乘法后的宽度</td>
+</tr>
+<tr>
+<td><code>tie_word_embeddings</code></td>
+<td>true</td>
+<td>此配置的 Embedding 与 LM Head 共享权重</td>
+</tr>
+</tbody></table></div>
+</section>
+<section id="section-2"><h3>Attention 输出为什么先 flatten，再交给 o_proj</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>q, k = self.rotary_emb(positions, q, k)
 o = self.attn(q, k, v)
 output = self.o_proj(o.flatten(<span class="tok-number">1</span>, -<span class="tok-number">1</span>))
@@ -302,7 +370,7 @@ output = self.o_proj(o.flatten(<span class="tok-number">1</span>, -<span class="
 <p>例如假设单卡有 16 个 Q 头、每头 128 维、<code>hidden_size=1024</code>，则形状变化为 <code>[N,16,128] → [N,2048] → [N,1024]</code>。<code>o_proj</code> 的输入特征宽度是 2048，输出宽度是 1024；它把同一个 token 的各头结果共同投影回隐藏状态。多卡时，每张卡先合并自己负责的 Q 头，<code>RowParallelLinear</code> 再合并各 rank 的部分输出。<a class="inline-link" href="https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/nanovllm/layers/linear.py" target="_blank" rel="noopener noreferrer"><code>RowParallelLinear</code></a></p>
 <p>展平的关键是<strong>让最后一维与权重的输入特征数一致</strong>。PyTorch 线性层也能处理高维张量，只要求最后一维等于 <code>in_features</code>。若把上例的 <code>[N,16,128]</code> 直接交给期待 2048 个输入特征的投影，最后一维 128 就不匹配；不是因为张量有三维才不能计算。<a class="inline-link" href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.Linear.html" target="_blank" rel="noopener noreferrer">PyTorch Linear 输入形状</a></p>
 </section>
-<section id="section-2"><h3>residual 为什么跨层更新，为什么每层返回两个张量</h3>
+<section id="section-3"><h3>residual 为什么跨层更新，为什么每层返回两个张量</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code><span class="tok-keyword">if</span> residual <span class="tok-keyword">is</span> <span class="tok-constant">None</span>:
     hidden_states, residual = self.input_layernorm(hidden_states), hidden_states
 <span class="tok-keyword">else</span>:
@@ -380,7 +448,7 @@ hidden_states, _ = self.norm(hidden_states, residual)
 <span class="tok-keyword">return</span> hidden_states</code></pre></figure>
 <p>这种写法优化的是加法和归一化的组织方式。将前面输出代数展开后写进 <code>residual</code>，不等于每层信息都被无损保存，也不能单凭这段推理代码得出训练更稳定的结论。</p>
 </section>
-<section id="section-3"><h3>packed_modules_mapping 怎样把分离权重装进合并投影</h3>
+<section id="section-4"><h3>packed_modules_mapping 怎样把分离权重装进合并投影</h3>
 <figure class="engine-code"><figcaption>代码片段 <span>Python</span></figcaption><pre><code>packed_modules_mapping = {
     <span class="tok-string">&quot;q_proj&quot;</span>: (<span class="tok-string">&quot;qkv_proj&quot;</span>, <span class="tok-string">&quot;q&quot;</span>),
     <span class="tok-string">&quot;k_proj&quot;</span>: (<span class="tok-string">&quot;qkv_proj&quot;</span>, <span class="tok-string">&quot;k&quot;</span>),

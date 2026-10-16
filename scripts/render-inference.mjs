@@ -57,7 +57,7 @@ const chapters = [
   {
     stem: "07-qwen3",
     sourceFile: "qwen3.py",
-    description: "qwen3.py 完整注释代码及注意力头展平、残差传递、QKV 与 gate/up 合并权重加载的源码解析。",
+    description: "qwen3.py 完整注释代码、Qwen3 Dense 整体与单层结构图，以及注意力展平、残差传递和合并权重加载的源码解析。",
     deck: "第 7 章 · 完整注释代码与 Qwen3 模型结构",
     previous: { href: "06-model-runner.html", text: "上一章：model_runner.py" },
     next: null,

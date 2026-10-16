@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1020" role="img" aria-labelledby="title desc"><title id="title">Qwen3稠密模型整体结构</title><desc id="desc">左侧为token输入经Embedding、L层Decoder和最终RMSNorm再由LMHead输出logits；右侧展开每层的两次前归一化、Attention、MLP与残差。采样在模型之外。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1264" height="1004" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="42" y="57" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="750" fill="#1b5136" text-anchor="start">Qwen3 Dense：整体模型与单个 Decoder Layer</text>
+<text x="42" y="93" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">依据 Nano-vLLM qwen3.py 与 Qwen3 官方资料绘制；层数和维度由配置决定。</text>
+<rect x="36" y="118" width="448" height="750" rx="12" fill="#f5f8ee" stroke="#b5cfab" stroke-width="2"/>
+<text x="61" y="148" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="700" fill="#1b5136" text-anchor="start">Qwen3ForCausalLM</text>
+<rect x="64" y="237" width="392" height="426" rx="12" fill="#fffdf7" stroke="#b5cfab" stroke-width="2"/>
+<text x="83" y="266" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="start">Qwen3Model</text>
+<rect x="100" y="171" width="320" height="47" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="201.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">Token IDs</text>
+<rect x="100" y="283" width="320" height="68" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="312" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">Embedding</text>
+<text x="260.0" y="338" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">embed_tokens</text>
+<rect x="100" y="396" width="320" height="96" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="425" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">Decoder Layer × L</text>
+<text x="260.0" y="451" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">layers：Qwen3DecoderLayer</text>
+<rect x="100" y="540" width="320" height="67" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="569" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">Final RMSNorm</text>
+<text x="260.0" y="595" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">norm</text>
+<text x="260" y="643" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="middle">forward() 返回隐藏状态</text>
+<rect x="100" y="696" width="320" height="68" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="725" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">LM Head</text>
+<text x="260.0" y="751" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">compute_logits() → lm_head</text>
+<rect x="100" y="805" width="320" height="47" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="835.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">词表 logits</text>
+<rect x="100" y="911" width="320" height="62" rx="12" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="260.0" y="940" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">采样 → 下一个 token</text>
+<text x="260.0" y="966" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">模型外：ModelRunner / Sampler</text>
+<path d="M260 219 L260 279" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 352 L260 389" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 493 L260 532" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 608 L260 622" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 651 L260 689" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 765 L260 797" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M260 853 L260 902" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="550" y="118" width="690" height="750" rx="12" fill="#f5f8ee" stroke="#b5cfab" stroke-width="2"/>
+<text x="577" y="153" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="700" fill="#1b5136" text-anchor="start">Qwen3DecoderLayer：展开一层</text>
+<path d="M424 446 H541" fill="none" stroke="#3e7851" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#a)"/>
+<text x="475" y="426" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="600" fill="#1b5136" text-anchor="middle">展开</text>
+<rect x="760" y="181" width="340" height="48" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="212.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">本层输入 x</text>
+<rect x="760" y="263" width="340" height="56" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="298.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">RMSNorm₁：input_layernorm</text>
+<rect x="760" y="355" width="340" height="75" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="384" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">Qwen3Attention</text>
+<text x="930.0" y="410" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">GQA · QK-Norm · RoPE</text>
+<circle cx="930" cy="480" r="23" fill="#faecd2" stroke="#b9955e" stroke-width="2"/>
+<text x="930" y="488" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700" fill="#1b5136" text-anchor="middle">+</text>
+<text x="970" y="487" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">y = x + a</text>
+<rect x="760" y="538" width="340" height="56" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="573.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700" fill="#1b5136" text-anchor="middle">RMSNorm₂：post_attention_layernorm</text>
+<rect x="760" y="625" width="340" height="75" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="654" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">Qwen3MLP</text>
+<text x="930.0" y="680" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">SwiGLU 门控前馈</text>
+<circle cx="930" cy="759" r="23" fill="#faecd2" stroke="#b9955e" stroke-width="2"/>
+<text x="930" y="767" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700" fill="#1b5136" text-anchor="middle">+</text>
+<text x="970" y="766" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start"></text>
+<text x="970" y="793" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">z = y + m</text>
+<rect x="760" y="807" width="340" height="42" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="930.0" y="835.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="#1b5136" text-anchor="middle">下一层的输入 z</text>
+<path d="M930 231 L930 255" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 320 L930 347" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 431 L930 450" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 505 L930 530" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 595 L930 617" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 701 L930 730" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M930 784 L930 799" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M760 205 H608 V480 H897" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="621" y="342" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">残差 x</text>
+<path d="M930 515 H1180 V759 H964" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="1115" y="611" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#1b5136" text-anchor="start">残差 y</text>
+<text x="577" y="918" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#1b5136" text-anchor="start">加法按数学等价的结构画出。</text>
+<text x="577" y="954" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136" text-anchor="start">代码将 MLP 后的相加延至下一处 RMSNorm，</text>
+<text x="577" y="984" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="500" fill="#1b5136" text-anchor="start">并用 (hidden_states, residual) 分开传递。</text>
+</svg>

@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1115" role="img" aria-labelledby="title desc"><title id="title">Qwen3注意力和SwiGLU内部结构</title><desc id="desc">Attention把隐藏状态投影并拆为QKV，QK归一化和RoPE后执行因果GQA，再展平和输出投影；MLP用gate/up投影、SiLU逐元素门控与down投影。</desc><defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#3e7851" stroke-width="1.8"/></marker></defs>
+<rect x="8" y="8" width="1264" height="1099" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+<text x="42" y="57" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="750" fill="#1b5136" text-anchor="start">单层内部：Qwen3Attention 与 Qwen3MLP</text>
+<text x="42" y="93" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="450" fill="#52705b" text-anchor="start">尺寸以官方 Qwen3-0.6B 单卡配置为例；两条路径分别接收各自前置 RMSNorm 的输出。</text>
+<rect x="36" y="119" width="720" height="925" rx="12" fill="#f5f8ee" stroke="#b5cfab" stroke-width="2"/>
+<text x="58" y="154" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="700" fill="#1b5136" text-anchor="start">Qwen3Attention</text>
+<rect x="800" y="119" width="444" height="925" rx="12" fill="#f5f8ee" stroke="#b5cfab" stroke-width="2"/>
+<text x="822" y="154" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="25" font-weight="700" fill="#1b5136" text-anchor="start">Qwen3MLP（SwiGLU）</text>
+<rect x="218" y="182" width="344" height="49" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="390.0" y="213.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">输入 [N, 1024]</text>
+<rect x="134" y="270" width="512" height="68" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="390.0" y="299" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">qkv_proj → split</text>
+<text x="390.0" y="325" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">合并输出 [N, 4096]：2048 + 1024 + 1024</text>
+<rect x="72" y="386" width="195" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="169.5" y="415" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">Q</text>
+<text x="169.5" y="441" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 16, 128]</text>
+<rect x="302" y="386" width="195" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="399.5" y="415" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">K</text>
+<text x="399.5" y="441" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 8, 128]</text>
+<rect x="532" y="386" width="195" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="629.5" y="415" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">V</text>
+<text x="629.5" y="441" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 8, 128]</text>
+<rect x="72" y="497" width="195" height="54" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="169.5" y="531.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">Q RMSNorm</text>
+<rect x="302" y="497" width="195" height="54" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="399.5" y="531.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="19" font-weight="700" fill="#1b5136" text-anchor="middle">K RMSNorm</text>
+<rect x="72" y="596" width="195" height="57" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="169.5" y="631.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700" fill="#1b5136" text-anchor="middle">RoPE (positions)</text>
+<rect x="302" y="596" width="195" height="57" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="399.5" y="631.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700" fill="#1b5136" text-anchor="middle">RoPE (positions)</text>
+<text x="647" y="530" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="15" font-weight="500" fill="#1b5136" text-anchor="start">V 保持原值</text>
+<text x="647" y="558" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="15" font-weight="500" fill="#1b5136" text-anchor="start">不归一化</text>
+<text x="647" y="586" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="15" font-weight="500" fill="#1b5136" text-anchor="start">不旋转</text>
+<rect x="134" y="738" width="512" height="87" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="390.0" y="767" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">因果 GQA 注意力</text>
+<text x="390.0" y="793" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">16 个 Q 头共享 8 组 K/V；读取可见历史 KV</text>
+<rect x="134" y="880" width="512" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="390.0" y="909" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">flatten heads → o_proj</text>
+<text x="390.0" y="935" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 16, 128] → [N, 2048] → [N, 1024]</text>
+<rect x="218" y="986" width="344" height="42" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="390.0" y="1014.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">Attention 输出 a</text>
+<path d="M390 233 L390 262" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M390 339 V361 M170 361 H630" fill="none" stroke="#3e7851" stroke-width="3"/>
+<path d="M170 361 L170 378" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M400 361 L400 378" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M630 361 L630 378" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M170 457 L170 489" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M400 457 L400 489" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M170 552 L170 588" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M400 552 L400 588" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M170 655 V698 H233 V730" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M400 655 L400 730" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M630 457 L630 730" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M390 827 L390 872" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M390 951 L390 978" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<rect x="850" y="182" width="344" height="49" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1022.0" y="213.5" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">输入 [N, 1024]</text>
+<rect x="850" y="270" width="344" height="68" rx="12" fill="#dceaf0" stroke="#b5cfab" stroke-width="2"/>
+<text x="1022.0" y="299" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">gate_up_proj → split</text>
+<text x="1022.0" y="325" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 6144] 分成两份 [N, 3072]</text>
+<rect x="828" y="386" width="174" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="915.0" y="415" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">gate</text>
+<text x="915.0" y="441" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 3072]</text>
+<rect x="1044" y="386" width="174" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1131.0" y="415" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="23" font-weight="700" fill="#1b5136" text-anchor="middle">up</text>
+<text x="1131.0" y="441" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 3072]</text>
+<rect x="828" y="497" width="174" height="54" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="915.0" y="531.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">SiLU</text>
+<circle cx="1023" cy="655" r="25" fill="#faecd2" stroke="#b9955e" stroke-width="2"/>
+<text x="1023" y="664" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="29" font-weight="700" fill="#1b5136" text-anchor="middle">×</text>
+<rect x="850" y="700" width="344" height="50" rx="12" fill="#faecd2" stroke="#b5cfab" stroke-width="2"/>
+<text x="1022" y="733" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="650" fill="#1b5136" text-anchor="middle">SiLU(gate) ⊙ up</text>
+<rect x="850" y="800" width="344" height="69" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1022.0" y="829" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700" fill="#1b5136" text-anchor="middle">down_proj</text>
+<text x="1022.0" y="855" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="500" fill="#486953" text-anchor="middle">[N, 3072] → [N, 1024]</text>
+<rect x="850" y="986" width="344" height="42" rx="12" fill="#e7f2df" stroke="#b5cfab" stroke-width="2"/>
+<text x="1022.0" y="1014.0" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#1b5136" text-anchor="middle">MLP 输出 m</text>
+<path d="M1022 233 L1022 262" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1022 339 V360 H915 V378" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1022 339 V360 H1131 V378" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M915 457 L915 489" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M915 553 V655 H990" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1131 457 V655 H1056" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1023 682 L1023 692" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1023 752 L1023 790" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<path d="M1023 871 L1023 978" fill="none" stroke="#3e7851" stroke-width="3" marker-end="url(#a)"/>
+<text x="42" y="1085" font-family="Inter, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="550" fill="#1b5136" text-anchor="start">图按 attention_bias=False 的官方配置绘制：Q/K 按头归一化后旋转；V 直接参与注意力。</text>
+</svg>

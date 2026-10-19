@@ -507,7 +507,8 @@ q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-<span class=
 <p>多卡时，表中的单卡行范围需要换成每个 rank 的本地范围。加载器会先从<strong>每份原始 Q/K/V 权重</strong>中按行取当前 rank 的分片，再写到本卡的合并参数中。上例若使用两路张量并行，每张卡持有 <code>Q[1024,1024]</code>、<code>K[512,1024]</code>、<code>V[512,1024]</code>，合并后为 <code>[2048,1024]</code>。这种切分保证每张卡都有自己的 Q、K、V 片段；若直接把完整 <code>[Q;K;V]</code> 大矩阵一刀切成两半，就不能得到同样的分布。</p>
 </section>
             <div class="reader-actions"><a href="index.html">返回 Nano-vLLM 章节目录</a>
-<a href="06-model-runner.html">上一章：model_runner.py</a></div>
+<a href="06-model-runner.html">上一章：model_runner.py</a>
+<a href="08-nsight-systems.html">下一章：Nsight Systems 性能分析</a></div>
           </article>
         </div>
       </main>

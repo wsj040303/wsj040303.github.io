@@ -60,6 +60,13 @@ const chapters = [
     description: "qwen3.py 完整注释代码、Qwen3 Dense 整体与单层结构图，以及注意力展平、残差传递和合并权重加载的源码解析。",
     deck: "第 7 章 · 完整注释代码与 Qwen3 模型结构",
     previous: { href: "06-model-runner.html", text: "上一章：model_runner.py" },
+    next: { href: "08-nsight-systems.html", text: "下一章：Nsight Systems 性能分析" },
+  },
+  {
+    stem: "08-nsight-systems",
+    description: "使用 Nsight Systems 分析 RTX 5070 上 nano-vLLM 运行 Qwen3-0.6B 的推理性能，结合基准计时、时间线、内核统计和 CPU/GPU 事件关联定位热点。",
+    deck: "第 8 章 · 基准计时、时间线、热点统计与 CPU/GPU 关联分析",
+    previous: { href: "07-qwen3.html", text: "上一章：qwen3.py" },
     next: null,
   },
 ];

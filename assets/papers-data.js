@@ -9,6 +9,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning（重读版）",
+    shortName: "DeepSeek-R1 · 重读",
+    aliases: ["DeepSeek-R1-Zero", "GRPO", "PPO", "规则奖励", "词表与语言混用"],
+    category: "training",
+    year: "2025",
+    venue: "arXiv",
+    summary: "从连续追问出发，拆解 GRPO 三个公式、奖励来源、语言混用与 R1 的多阶段训练。",
+    articleUrl: "deepseek-r1-revisit/",
+    url: "https://arxiv.org/abs/2501.12948"
+  },
+  {
     title: "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
     shortName: "DeepSeek-R1",
     aliases: ["DeepSeek-R1-Zero", "GRPO", "组相对策略优化", "长链推理", "强化学习"],

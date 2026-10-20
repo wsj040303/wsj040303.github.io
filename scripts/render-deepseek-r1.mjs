@@ -15,13 +15,13 @@ const escapeHtml = (value) => String(value)
   .replaceAll('"', "&quot;");
 
 const sectionIds = new Map([
-  ["主要工作", "overview"],
-  ["研究背景", "background"],
-  ["问题定义", "problem"],
-  ["方法原理", "method"],
-  ["实验与证据", "evidence"],
-  ["局限性", "limitations"],
-  ["结论", "conclusion"],
+  ["论文的训练问题与主要主张", "research-question"],
+  ["R1-Zero 与 R1 的两条训练路线", "training-routes"],
+  ["GRPO：把同题回答的奖励变成策略更新", "grpo"],
+  ["奖励设计：不同任务使用不同裁判", "rewards"],
+  ["实验如何支持这些主张", "evidence"],
+  ["局限与结论", "limitations"],
+  ["延伸问答", "further-questions"],
 ]);
 
 const source = fs.readFileSync(sourcePath, "utf8");

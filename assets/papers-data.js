@@ -1,5 +1,6 @@
 // Edit this list to add reading records. Sample entries are public papers, not personal reading claims.
 window.PAPER_CATEGORIES = [
+  { id: "training", name: "训练与对齐" },
   { id: "inference", name: "推理引擎" },
   { id: "operators", name: "算子与内存" },
   { id: "compiler", name: "编译与编程模型" },
@@ -7,6 +8,17 @@ window.PAPER_CATEGORIES = [
 ];
 
 window.PAPER_ENTRIES = [
+  {
+    title: "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+    shortName: "DeepSeek-R1",
+    aliases: ["DeepSeek-R1-Zero", "GRPO", "组相对策略优化", "长链推理", "强化学习"],
+    category: "training",
+    year: "2025",
+    venue: "arXiv",
+    summary: "解释 GRPO 的组内优势与裁剪目标、规则奖励、R1 的多阶段训练和实验证据。",
+    articleUrl: "deepseek-r1/",
+    url: "https://arxiv.org/abs/2501.12948"
+  },
   {
     title: "AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration",
     shortName: "AWQ",

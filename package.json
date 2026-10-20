@@ -20,8 +20,6 @@
     "check:awq": "node scripts/render-awq.mjs --check",
     "build:deepseek-r1": "node scripts/render-deepseek-r1.mjs",
     "check:deepseek-r1": "node scripts/render-deepseek-r1.mjs --check",
-    "build:deepseek-r1-revisit": "node scripts/render-deepseek-r1-revisit.mjs",
-    "check:deepseek-r1-revisit": "node scripts/render-deepseek-r1-revisit.mjs --check",
     "build:inference": "node scripts/render-inference.mjs",
     "check:inference": "node scripts/render-inference.mjs --check"
   },

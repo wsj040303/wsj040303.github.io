@@ -15,6 +15,7 @@ window.PAPER_ENTRIES = [
     category: "training",
     year: "2025",
     venue: "arXiv",
+    rating: 4.5,
     summary: "从论文的训练问题出发，解释 GRPO、规则与模型奖励、语言混合及实验证据。",
     articleUrl: "deepseek-r1/",
     url: "https://arxiv.org/abs/2501.12948"

@@ -1,6 +1,8 @@
 # 聊天模型的概率校准与正确性预测
 
-本文精读 Benjamin Plaut、Nguyen X. Khanh 与 Tu Trinh 的 *Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&A*，依据中英对照 PDF 所收录的英文原文，即 [arXiv:2402.13213v4，2025 年 8 月 7 日版本](https://arxiv.org/abs/2402.13213v4)。论文发表于 *Transactions on Machine Learning Research*（TMLR，2025 年 8 月），研究对象是多项选择问答中的聊天大语言模型。本文解释概率的取法、两类不确定性评价及弃权实验；图表与模型结果来自论文，算例另行标明，未重新运行大模型评测。
+本文精读 Benjamin Plaut、Nguyen X. Khanh 与 Tu Trinh 的 *Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&A*，依据中英对照 PDF 所收录的英文原文，即 [arXiv:2402.13213v4，2025 年 8 月 7 日版本](https://arxiv.org/abs/2402.13213v4)。论文发表于 *Transactions on Machine Learning Research*（TMLR，2025 年 8 月），研究对象是多项选择问答中的聊天大语言模型。
+
+**阅读建议：了解最开头“论文的研究问题与主要主张”一节的核心结论即可，无需深究作者研究的技术细节。**
 
 ## 论文的研究问题与主要主张
 

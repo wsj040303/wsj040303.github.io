@@ -52,7 +52,8 @@
           </aside>
           <article class="reader-content paper-article">
 <!-- CHAT_LLM_CALIBRATION_ARTICLE_START -->
-<div class="paper-intro"><p>本文精读 Benjamin Plaut、Nguyen X. Khanh 与 Tu Trinh 的 <em>Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&amp;A</em>，依据中英对照 PDF 所收录的英文原文，即 <a class="inline-link" href="https://arxiv.org/abs/2402.13213v4">arXiv:2402.13213v4，2025 年 8 月 7 日版本</a>。论文发表于 <em>Transactions on Machine Learning Research</em>（TMLR，2025 年 8 月），研究对象是多项选择问答中的聊天大语言模型。本文解释概率的取法、两类不确定性评价及弃权实验；图表与模型结果来自论文，算例另行标明，未重新运行大模型评测。</p>
+<div class="paper-intro"><p>本文精读 Benjamin Plaut、Nguyen X. Khanh 与 Tu Trinh 的 <em>Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&amp;A</em>，依据中英对照 PDF 所收录的英文原文，即 <a class="inline-link" href="https://arxiv.org/abs/2402.13213v4">arXiv:2402.13213v4，2025 年 8 月 7 日版本</a>。论文发表于 <em>Transactions on Machine Learning Research</em>（TMLR，2025 年 8 月），研究对象是多项选择问答中的聊天大语言模型。</p>
+<p><strong>阅读建议：了解最开头“论文的研究问题与主要主张”一节的核心结论即可，无需深究作者研究的技术细节。</strong></p>
 </div>
 <section id="main-findings"><h3>论文的研究问题与主要主张</h3>
 <p><strong>论文的核心结论是：聊天模型给答案的概率通常偏高，不能直接当作正确率；但正确回答仍倾向于得到更高的概率，因此这些概率仍能帮助识别错误。模型问答能力越强，这种区分能力通常越好，概率数值本身却没有同步变得更准确。</strong><a class="inline-link" href="https://arxiv.org/pdf/2402.13213v4#page=3">论文，§1.1、表 1</a></p>

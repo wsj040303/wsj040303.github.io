@@ -1,0 +1,8 @@
+/* Keep Markdown column alignment consistent between table headers and cells. */
+.paper-article th[align="center"],
+.paper-article td[align="center"] { text-align: center; }
+.paper-article th[align="right"],
+.paper-article td[align="right"] { text-align: right; }
+.paper-article th[align="left"],
+.paper-article td[align="left"] { text-align: left; }
+.paper-article th .math-inline { color: inherit; }

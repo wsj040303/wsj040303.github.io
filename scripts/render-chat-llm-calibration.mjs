@@ -16,16 +16,13 @@ const escapeHtml = (value) => String(value)
 
 const sectionIds = new Map([
   ["论文的研究问题与主要主张", "main-findings"],
-  ["研究背景：聊天微调后的不确定性信息", "background"],
   ["MSP 的计算：从答案 token 得到一道题的分数", "msp"],
   ["校准：分数的数值能否对应正确率", "calibration"],
   ["正确性预测：分数能否区分正确与错误回答", "correctness-prediction"],
   ["实验与证据：能力、校准与排序的不同关系", "evidence"],
   ["选择性弃权：把排序信号变成回答策略", "abstention"],
-  ["基础模型与事后校准的对照", "base-and-recalibration"],
   ["局限性：从选择题统计到开放式回答的距离", "limitations"],
   ["结论", "conclusion"],
-  ["延伸问答", "further-questions"],
 ]);
 
 const source = fs.readFileSync(sourcePath, "utf8");

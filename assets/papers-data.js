@@ -27,6 +27,7 @@ window.PAPER_ENTRIES = [
     category: "inference",
     year: "2025",
     venue: "ES-FoMo III workshop / arXiv",
+    rating: 2,
     summary: "聚焦路由、压缩和调度，解释三者如何减少 KV 存储与搬运开销。",
     articleUrl: "pikv/",
     url: "https://arxiv.org/abs/2508.06526"

@@ -10,6 +10,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "PiKV: KV Cache Management System for Mixture of Experts",
+    shortName: "PiKV",
+    aliases: ["MoE", "专家分片", "KV 缓存", "稀疏路由", "缓存调度", "FPGA"],
+    category: "inference",
+    year: "2025",
+    venue: "ES-FoMo III workshop / arXiv",
+    summary: "解释专家分片、路由、压缩与页调度，逐项核对成本公式和实验证据。",
+    articleUrl: "pikv/",
+    url: "https://arxiv.org/abs/2508.06526"
+  },
+  {
     title: "Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&A",
     shortName: "聊天模型概率校准与正确性预测",
     aliases: ["MSP", "AUROC", "ECE", "calibration", "概率校准", "正确性预测", "选择性弃权"],

@@ -23,7 +23,9 @@
     "build:inference": "node scripts/render-inference.mjs",
     "check:inference": "node scripts/render-inference.mjs --check",
     "build:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs",
-    "check:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs --check"
+    "check:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs --check",
+    "build:pikv": "node scripts/render-pikv.mjs",
+    "check:pikv": "node scripts/render-pikv.mjs --check"
   },
   "devDependencies": {
     "katex": "^0.16.47",

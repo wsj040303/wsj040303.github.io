@@ -19,7 +19,6 @@ const sectionIds = new Map([
   ["路由：缩小本次查询的 KV 访问范围", "routing"],
   ["压缩：减少每条 KV 的存储与搬运量", "compression"],
   ["调度：让有限容量优先保留有用的 KV 页", "scheduling"],
-  ["三者协作与论文的适用边界", "evidence"],
 ]);
 
 const source = fs.readFileSync(sourcePath, "utf8");

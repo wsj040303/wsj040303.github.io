@@ -1,0 +1,305 @@
+<!doctype html>
+<!-- Generated from article.md with npm run build:confbench; edit the Markdown source. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="围绕 ConfBench 的四项实证发现，解释文档抽取的输入模态、模型能力、置信度校准与首 token 排序。">
+    <meta name="theme-color" content="#0b2015">
+    <title>ConfBench：文档抽取置信度的四项实证发现 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/math/katex.min.css">
+    <link rel="stylesheet" href="../../assets/paper-article.css?v=math-20261013">
+    <link rel="stylesheet" href="article.css?v=2">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../">首页</a>
+          <a href="../../ai-infra/">AI Infra</a>
+          <a href="../" aria-current="page">论文阅读</a>
+          <a href="../../projects/">GitHub 项目</a>
+          <a href="../../resources/">推荐资料</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../">首页</a><span>/</span><a href="../">论文阅读</a><span>/</span>ConfBench</nav>
+        <div class="reader-heading"><h1>ConfBench：文档抽取置信度的四项实证发现</h1><p class="article-deck">从四项实证发现理解多 token 文档抽取中的置信度。</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>文章目录</summary><nav aria-label="本文目录"><ol class="chapter-list">
+<!-- CONFBENCH_TOC_START -->
+<li><a href="#main-findings">论文的研究问题与主要主张</a></li>
+<li><a href="#task">任务与方法：从发票抽取字段，再为字段打分</a><ol class="chapter-sublist"><li><a href="#task-1">输入文档与固定字段结构</a></li><li><a href="#task-2">两类置信度与多 token 字段</a></li></ol></li>
+<li><a href="#metrics">评价对象：字段正确性、分数排序与绝对校准</a></li>
+<li><a href="#modality">发现一：OCR 文本与图像结合更有效</a></li>
+<li><a href="#capability">发现二：能力层级有参考价值，参数量不能单独预测</a></li>
+<li><a href="#calibration">发现三：后处理校准改变分数尺度，不自动改善错误排序</a></li>
+<li><a href="#first-token">发现四：首 token 分数更适合排序，但证据范围有限</a></li>
+<li><a href="#limitations">数据与结论的适用范围</a></li>
+<li><a href="#datasets">数据集获取</a></li>
+<!-- CONFBENCH_TOC_END -->
+            </ol></nav></details>
+          </aside>
+          <article class="reader-content paper-article">
+<!-- CONFBENCH_ARTICLE_START -->
+<div class="paper-intro"><p>这篇论文与博客中的<a class="inline-link" href="https://wsj040303.github.io/papers/chat-llm-calibration/">《聊天模型的概率校准与正确性预测》</a>很相似：两者都关心模型的置信分数能否反映答案是否正确，以及这些分数能否帮助识别错误。前一篇只研究多项选择题，答案用一个选项字母表示； <strong>ConfBench 将问题推进到更复杂的文档抽取：一个字段值可以包含多个 token，一次输出包含多个字段和嵌套的表格行项目。</strong> 它仍有预定义的字段结构和可比较的标准答案，研究范围尚未扩展到任意长篇回答的整体可信度。</p>
+<p>本文阅读 Priyashree Roy 等人的 <em>Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction</em>，依据所提供中英对照 PDF 的英文原文：<a class="inline-link" href="https://arxiv.org/abs/2608.01792v1">arXiv:2608.01792v1，2026 年 8 月 3 日</a>。重点是实验发现及其适用范围，方法只保留理解结果必需的部分。文中数值和原图来自论文，未重新运行模型评测。</p>
+</div>
+<section id="main-findings"><h3>论文的研究问题与主要主张</h3>
+<p><strong>ConfBench 的主要价值是说明：文档抽取中的置信度确实有用，但输入模态、模型能力、分数来源和实际使用方式都会影响它的可靠程度。</strong> “把错误排在前面”与“报出的 0.9 真能对应约 90% 的正确率”是两项不同要求。论文摘要的四项发现可以整理如下。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>主要发现</th>
+<th>论文证据支持的具体含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>OCR 文本与图像结合，置信度质量更好</strong></td>
+<td>在所测配置中，OCR+Image 的抽取质量与对错区分能力最好；OCR 文本还包含 OCR 引擎自身的识别置信度。</td>
+</tr>
+<tr>
+<td><strong>模型能力比跨模型的参数量更有解释力</strong></td>
+<td>Claude 系列中，Opus、Sonnet、Haiku 的置信度质量依次降低；Qwen 3.6-27B 的区分能力却高于更大的 Qwen 3 VL-235B。</td>
+</tr>
+<tr>
+<td><strong>绝对校准差异很大，后处理的用途取决于路由规则</strong></td>
+<td>Opus 在本基准上校准较好，部分模型明显过度自信。保持排序的分数重映射可用于调整阈值路由，却不会改善固定预算下的复核顺序；论文没有报告后处理后的实验结果。</td>
+</tr>
+<tr>
+<td><strong>logprob 方法中，首 token 分数的排序效果最好</strong></td>
+<td>在两个接受此项比较的模型上，first-token 的 AUROC 都高于 mean-token 和 margin；这一领先不等于绝对校准也更好。</td>
+</tr>
+</tbody></table></div>
+<p><em>依据<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=9">论文摘要、§5、表 3</a>整理。这里的“更好”都对应具体实验与指标，不作为所有模型、所有文档任务的普遍结论。</em></p>
+<p>结果还有一个实际落点：用最佳配置的置信度挑选最低分的 30% 字段进行复核，能找到随机复核同样数量字段时 <strong>2.43 倍</strong> 的错误。这说明即使抽取还不完美，置信度也能帮助安排有限的人工复核量。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=9">论文，§5.4、表 3</a></p>
+</section>
+<section id="task"><h3>任务与方法：从发票抽取字段，再为字段打分</h3>
+<h4 id="task-1">输入文档与固定字段结构</h4>
+<p>论文中的 <strong>IDP 是 Intelligent Document Processing，即智能文档处理</strong> 。中译版某处把 IDP 译成了“身份证明”，英文原文的应用背景实际是从发票、合同等企业文档中提取结构化信息，再将不确定的结果转交人工复核。本文实验具体使用美国联邦通信委员会（FCC）公开记录中的政治广告发票。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=3">论文，§1、§3</a></p>
+<p>这里的任务属于 <strong>关键信息抽取</strong> （Key Information Extraction，KIE）：根据预先指定的 schema，也就是字段名称、类型及含义组成的输出结构，从文档中找到相应的值。模型可接收 OCR 识别文本、文档图像，或两者结合。六个文档级字段包括代理机构、广告主、总金额、付款条款、代理佣金和应付净额；此外还有长度可变的 <code>LineItems</code> 数组，每条记录含日期、播出日（Days）、描述、费率等五个子字段。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=15">论文，附录 A.5</a></p>
+<p>下面只展示输出的一部分， <strong>这是解释性构造示例，不是论文中的真实预测</strong> 。数组里的两个对象代表两个行项目；同名子字段通过所属对象区分。</p>
+<figure class="code-block"><pre><code>{
+  &quot;Agency&quot;: &quot;Example Media&quot;,
+  &quot;GrossTotal&quot;: 1200,
+  &quot;NetAmountDue&quot;: 1020,
+  &quot;LineItems&quot;: [
+    {&quot;LineItemDescription&quot;: &quot;Morning News&quot;, &quot;LineItemRate&quot;: 100},
+    {&quot;LineItemDescription&quot;: &quot;Evening News&quot;, &quot;LineItemRate&quot;: 200}
+  ]
+}
+</code></pre></figure>
+<p>这里有些读者可能会疑惑： <strong>这是否只是 OCR 识别，看到什么就抄什么？</strong> OCR 提供文字识别结果；抽取模型还要将内容绑定到正确的业务字段。例如，发票里的几个金额分别可能是总额、佣金和应付净额，表格中相邻的描述与费率还需要归属于同一行。因此，任务包含字段语义判断和表格结构理解。它使用预定义 schema，论文没有将自动发现 schema 或复杂业务语义转换作为研究重点。日期格式等差异主要在评估时通过类型比较器处理。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=18">论文，附录 A.5</a></p>
+<p>论文的完整流程还保留了“先分类文档，再选择抽取 schema”这一步。不过基准只有 FCC 发票一类，作者报告分类始终正确，所以实验没有检验多种文档之间选择 schema 的能力。Image Only 配置的抽取阶段直接接收图像，文字识别与理解由视觉语言模型承担；只有启用 OCR 输入时，抽取模型才会读到上游 OCR 的结果。</p>
+<h4 id="task-2">两类置信度与多 token 字段</h4>
+<p>论文比较两条路线： <strong>verbalized confidence（显式自报置信度）</strong> 让模型在回答中写出概率； <strong>logprob confidence（对数概率置信度）</strong> 从生成 token 时的概率计算字段分数。</p>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图2-两类置信度估计.png" aria-label="打开原尺寸论文图片"><img src="images/原文图2-两类置信度估计.png" alt="原文图2：上方为联合抽取与自报置信度，下方为生成字段后读取token概率" loading="lazy" decoding="async"></a><figcaption>原文图 2：两条路线都按实体输出分数。上方在一次调用中生成候选与概率；下方先生成结构化答案，再由各字段值对应的 token 概率计算分数。截取自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=6">论文 p.6</a>。</figcaption></figure>
+
+<p>沿图 2 上半部分，模型对每个字段给出四个候选值及各自的概率，选概率最高的候选作为抽取结果，并保留它的概率作为置信度。论文称其为 <strong>1S-TopK</strong> ：single-stage 表示抽取和打分在同一次调用内完成。例如，模型为某金额的四个不同候选分别自报 0.70、0.15、0.10、0.05，最终采用第一个候选及分数 0.70。这个数是模型生成的回答内容，尚需用实验检验是否可信。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=5">论文，§4.1、附录 A.6</a></p>
+<p>沿图 2 下半部分，模型只生成一份 JSON 答案。评估程序找到每个字段值对应的 token 区间，再将这个区间的生成概率转换成一个字段分数。 <strong>因此，一个字段跨越多个 token，最终仍只对应一个置信分数。</strong> 首 token、平均 token 和 margin 是三种计算方式，后文只展开与主要结论相关的区别。</p>
+<p>两种方法也存在实验上的差别：自报方法要求模型考虑候选并打分，可能改变最终抽取内容；logprob 的打分发生在生成之后。因此，表 3 中同一个模型使用两种方法时，抽取质量不完全相同。论文只在 Qwen 3.6-27B 和 Gemma 3-12B 上比较了两条路线，因为这些实验配置能获得 token 概率；这是本文的接口和算力条件，不能概括成 logprob 在原理上只适用于开放权重模型。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=19">论文，§5.2、附录 A.6</a></p>
+</section>
+<section id="metrics"><h3>评价对象：字段正确性、分数排序与绝对校准</h3>
+<p><strong>论文中的“实体”是一个字段值，或某个行项目中的一个子字段值。</strong> 模型输出虽然由连续的 token 构成，评测会先解析成结构化字段，再逐个与标准答案比较。长字段的置信度衡量的是该字段的正确性，并不直接代表整个 JSON 全部正确。</p>
+<p>附录 A.5 对标签生成的说明是：</p>
+<blockquote>
+<p>“For calibration, each score is converted to a binary correctness label using a per-field acceptance threshold, and paired with the entity’s confidence score.”</p>
+</blockquote>
+<p>这段原文中的 score 指 <strong>预测值与标准答案的相似度</strong> 。字符串使用字符级相似度，数值比较允许 1% 容差，日期按日历意义比较；行项目先配对，再评价各子字段。相似度平均得到 <strong>WOA（Weighted Overall Accuracy，加权整体准确率）</strong> ，本文对所有字段使用相同权重；评价置信度时，再用各字段的接受阈值把相似度变成正确或错误标签。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=18">论文，§4.2、附录 A.5</a></p>
+<p>因此， <strong>WOA 0.75 不能直接读成“75% 的字段被二值判定为正确”</strong> ：WOA 包含部分匹配得分。F1 则基于字段接受与拒绝计算，二者出现较大差距有指标定义上的原因。也不能用 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><mrow><mi mathvariant="normal">W</mi><mi mathvariant="normal">O</mi><mi mathvariant="normal">A</mi></mrow></mrow><annotation encoding="application/x-tex">1-\mathrm{WOA}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathrm">WOA</span></span></span></span></span></span> 直接代替错误字段比例。</p>
+<p>有了每个字段的“置信分数、对错标签”数据对，两个核心指标分别回答不同问题：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>指标</th>
+<th>衡量的问题</th>
+<th>读法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>AUROC</strong> ：受试者工作特征曲线下面积</td>
+<td>正确字段能否通常得到比错误字段更高的分数</td>
+<td>可理解为随机抽取一个正确字段和一个错误字段，正确者排在前面的概率，并对同分计一半；0.5 相当于随机排序，1 表示完全分开。</td>
+</tr>
+<tr>
+<td><strong>ECE</strong> ：Expected Calibration Error，期望校准误差</td>
+<td>自报概率是否接近实际正确比例</td>
+<td>将预测按分数分组，比较每组平均置信度与实际正确率，再按组内样本数加权；越低越好。本文使用 5 个基于分位数的自适应分组。</td>
+</tr>
+</tbody></table></div>
+<p><em>定义见<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=6">论文 §4.2</a>。AUROC 衡量区分能力；ECE 衡量分组后的数值偏差，结果也受分组方式影响。</em></p>
+<p>论文正文给出一个很直观的区分：正确字段都得 0.99、错误字段都得 0.90，排序完全正确，但错误字段的置信度严重偏高；反过来，若一批字段有 70% 正确，模型对所有字段都报 0.70，平均校准可以很好，却无法帮助挑出任何更可能出错的字段。 <strong>校准好和排序好可以同时发生，也可以彼此分离。</strong></p>
+<p>论文进一步定义 <strong>ECARB（Error Capture at Review Budget，给定复核预算下的错误捕获增益）</strong> ：按置信度从低到高复核一定比例的字段，找到的错误数除以随机复核同样数量字段时的期望错误数。附录 A.7 的算例是：100 个预测中有 20 个错误，复核 30 个；随机抽样平均找到 6 个错误，按置信度挑选若找到 15 个，则 ECARB 为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>15</mn><mi mathvariant="normal">/</mi><mn>6</mn><mo>=</mo><mn>2.5</mn></mrow><annotation encoding="application/x-tex">15/6=2.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">15/6</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.5</span></span></span></span></span>。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=20">论文，式（1）、附录 A.7</a></p>
+<p>表 3 的 Opus 得分为 2.43，按论文的比例定义，可换算成约 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.30</mn><mo>×</mo><mn>2.43</mn><mo>=</mo><mn>72.9</mn><mi mathvariant="normal">%</mi></mrow><annotation encoding="application/x-tex">0.30\times2.43=72.9\%</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.30</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.43</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8056em;vertical-align:-0.0556em;"></span><span class="mord">72.9%</span></span></span></span></span> 的错误被这 30% 的复核量覆盖。这个换算说明的是 <strong>捕获错误的比例</strong> ，不代表人工工时减少了 72.9%；字段长度和复核难度可能不同。30% 也是论文选取的展示点，并非推荐给所有系统的预算。</p>
+</section>
+<section id="modality"><h3>发现一：OCR 文本与图像结合更有效</h3>
+<p><strong>在本文实验中，OCR+Image 同时改善了抽取质量和置信度的区分能力。</strong> 三种输入配置里，OCR Only 居中，Image Only 最弱；小模型对是否提供 OCR 更敏感。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=7">论文，§5.1</a></p>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图3-输入模态比较.png" aria-label="打开原尺寸论文图片"><img src="images/原文图3-输入模态比较.png" alt="原文图3：横轴为抽取质量WOA，纵轴为置信度区分能力AUROC，不同形状表示输入模态" loading="lazy" decoding="async"></a><figcaption>原文图 3：颜色区分模型，方形表示 OCR，圆形表示图像，三角形表示 OCR+Image；实心与空心分别表示自报与首 token logprob 方法。截取自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=7">论文 p.7</a>。</figcaption></figure>
+
+<p>图的横轴向右表示抽取更准确，纵轴向上表示更能区分正确与错误字段。比较同一颜色、同一填充方式下的不同形状，结合 OCR 的三角形通常位于更右上方。论文报告，从 OCR+Image 改为 Image Only，Gemma 3-12B 的 AUROC 降低约 0.06，Opus 4.6 降低约 0.03。这说明较强模型仅凭图像也能保留较多有效信号，较弱模型更依赖额外的文字输入。</p>
+<p>输入中的 OCR 信息不只有识别后的文字。附录 A.5 说明，Amazon Textract 的输出被序列化为按阅读顺序排列的 <strong><code>(word, confidence)</code> 对</strong> ，即识别词与 OCR 置信度；OCR+Image 还同时提供文档图像。文字、识别可靠程度和视觉版式可以相互补充，这是结果的一种合理解释。实验没有单独移除 OCR 置信度，因此不能把全部提升只归因于“多了一份文本”，也不能分离各部分的独立贡献。</p>
+</section>
+<section id="capability"><h3>发现二：能力层级有参考价值，参数量不能单独预测</h3>
+<p>以下整理表 3 中所有模型的 <strong>自报置信度、OCR+Image</strong> 结果。WOA 越高越好，AUROC 越高越好，ECE 越低越好，ECARB 越高表示同样复核量能找到更多错误。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>模型</th>
+<th align="center">WOA ↑</th>
+<th align="center">AUROC ↑</th>
+<th align="center">ECE ↓</th>
+<th align="center">ECARB@30% ↑</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Claude Opus 4.6</td>
+<td align="center">0.75</td>
+<td align="center"><strong>0.84</strong></td>
+<td align="center"><strong>0.05</strong></td>
+<td align="center"><strong>2.43</strong></td>
+</tr>
+<tr>
+<td>Claude Sonnet 4.5</td>
+<td align="center"><strong>0.77</strong></td>
+<td align="center">0.77</td>
+<td align="center">0.13</td>
+<td align="center">2.24</td>
+</tr>
+<tr>
+<td>Claude Haiku 4.5</td>
+<td align="center">0.71</td>
+<td align="center">0.74</td>
+<td align="center">0.17</td>
+<td align="center">1.96</td>
+</tr>
+<tr>
+<td>Qwen 3.6-27B</td>
+<td align="center">0.74</td>
+<td align="center">0.72</td>
+<td align="center">0.22</td>
+<td align="center">1.93</td>
+</tr>
+<tr>
+<td>Kimi K2.5</td>
+<td align="center">0.76</td>
+<td align="center">0.67</td>
+<td align="center">0.20</td>
+<td align="center">1.68</td>
+</tr>
+<tr>
+<td>Qwen 3 VL-235B</td>
+<td align="center">0.64</td>
+<td align="center">0.62</td>
+<td align="center">0.25</td>
+<td align="center">1.53</td>
+</tr>
+<tr>
+<td>Gemma 3-12B</td>
+<td align="center">0.65</td>
+<td align="center">0.58</td>
+<td align="center">0.31</td>
+<td align="center">1.39</td>
+</tr>
+</tbody></table></div>
+<p><em>数据来自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=9">论文表 3</a>，均未经过后处理校准。</em></p>
+<p>Claude 的三个能力层级呈现一致趋势：Opus → Sonnet → Haiku，AUROC 和 ECARB 依次降低，ECE 逐步增大。但 <strong>“能力更强”不能在这里简单等同于“本任务 WOA 更高”</strong> ：Sonnet 的 WOA 0.77 高于 Opus 的 0.75，置信度指标却由 Opus 领先。论文的结论支持能力层级与置信度质量有关，并没有证明抽取准确率与校准质量逐模型严格单调对应。</p>
+<p>参数量也不足以决定结果。Qwen 3.6-27B 的 AUROC 为 0.72，高于 Qwen 3 VL-235B 的 0.62。两个模型属于不同代际与模型配置，这个比较足以说明“更大就一定更会判断自己是否正确”不成立，但没有控制训练数据、架构和后训练方法，无法单独识别是哪一项造成差异。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=8">论文，§5.3、附录 A.8</a></p>
+<p>这种差别会直接影响置信度方法的选择。同一输入条件下，Qwen 3.6-27B 的自报方法优于首 token logprob（AUROC 0.72 对 0.62），Gemma 3-12B 则相反（0.58 对 0.64）。 <strong>自报概率与读取 token 概率没有在本文中产生跨模型统一的赢家。</strong> 作者也明确指出，两组比较不足以建立“达到某种能力就应该改用自报方法”的一般规律。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=7">论文，§5.2</a></p>
+</section>
+<section id="calibration"><h3>发现三：后处理校准改变分数尺度，不自动改善错误排序</h3>
+<p><strong>Opus 在此基准上的自报分数已经较好地对应实际正确率，而其他一些模型明显偏高。</strong> 原文图 5b 展示了 Claude 三个层级的可靠性图：横轴是置信度，纵轴是对应分组的实际正确率，虚线 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi><mo>=</mo><mi>x</mi></mrow><annotation encoding="application/x-tex">y=x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord mathnormal" style="margin-right:0.0359em;">y</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span></span> 表示理想校准。</p>
+<figure class="paper-figure"><a class="inline-link" href="images/原文图5b-Claude可靠性图.png" aria-label="打开原尺寸论文图片"><img src="images/原文图5b-Claude可靠性图.png" alt="原文图5b：Opus、Sonnet和Haiku的可靠性图，展示实际正确率与置信度的关系" loading="lazy" decoding="async"></a><figcaption>原文图 5b：从左到右为 Opus 4.6、Sonnet 4.5、Haiku 4.5，ECE 分别为 0.05、0.13、0.17。柱高低于对角线表示置信度高于实际正确率；少于 30 个样本的分组被省略。截取自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=8">论文 p.8</a>。</figcaption></figure>
+
+<p>左侧 Opus 的柱高总体贴近对角线；中间和右侧越来越多的分组落到线下，表示其给出的概率偏乐观。读图时还要注意每组样本数：ECE 是按样本数加权的平均误差，样本集中的高置信区间会主导最终数值。</p>
+<p>后处理校准的目标，是用额外标注数据学习“原始分数应该对应多大的实际正确概率”。例如，若原始 0.95 附近的预测在独立数据上只有约 80% 正确，就应把这一段分数调整到接近 0.80。这是解释性示例，并非论文拟合出的映射。</p>
+<p>这里有些读者可能会疑惑： <strong>分数变准了，为什么错误识别指标不一定提高？</strong> 因为两种业务规则依赖的信息不同：</p>
+<ul>
+<li><strong>固定复核比例</strong> ：只检查分数最低的 30%。只要校准映射严格递增，同一批字段的先后顺序就不变，所检查的字段集合也不变，AUROC 与 ECARB 因而保持不变。</li>
+<li><strong>固定概率阈值</strong> ：只自动接受分数超过 0.90 的字段。将虚高的 0.95 调整到 0.80，会改变它是否通过阈值，因此绝对校准影响这种路由决策。</li>
+</ul>
+<p>这一论证适用于保持排序的变换。若变换把不同分数合并为同分，或使用额外特征重新打分，就需要重新考察排序和同分处理。即使总体 ECE 很低，业务上使用的某个高分区间也仍需单独验证。</p>
+<p><strong>论文没有实际报告后处理校准后的结果。</strong> §5.3 与附录 A.8 明确说明，可靠拟合与评价需要留出的校准数据，而现有语料规模不足以让作者放心设置这一划分。因此，摘要中的后处理结论应读为方法性质与应用判断：校准能调整概率尺度，但本文没有给出“某方法把 ECE 从多少降到多少”的实验依据。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=22">论文，§5.3、附录 A.8</a></p>
+</section>
+<section id="first-token"><h3>发现四：首 token 分数更适合排序，但证据范围有限</h3>
+<p><strong>first-token 指每个字段值的第一个 token，全文有多少个字段，就分别取多少次；它不是只取整个 JSON 的第一个 token。</strong> 生成过程仍然完成全部字段内容，只是计算字段置信分数时选择了首位置的概率。设某个字段值含 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>K</mi></mrow><annotation encoding="application/x-tex">K</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal" style="margin-right:0.0715em;">K</span></span></span></span></span> 个 token，第 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi></mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em;"></span><span class="mord mathnormal" style="margin-right:0.0315em;">k</span></span></span></span></span> 个生成 token 的对数概率为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">ℓ</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\ell_k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8444em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span>，三种方法为：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>方法</th>
+<th>字段分数</th>
+<th>保留的信息</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>first-token</td>
+<td><span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><msub><mi mathvariant="normal">ℓ</mi><mn>1</mn></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp(\ell_1)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></td>
+<td>第一次开始生成该字段值时，所选 token 的概率。</td>
+</tr>
+<tr>
+<td>mean-token</td>
+<td><span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mfrac><mn>1</mn><mi>K</mi></mfrac><msubsup><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>K</mi></msubsup><msub><mi mathvariant="normal">ℓ</mi><mi>k</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp(\frac{1}{K}\sum_{k=1}^{K}\ell_k)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.3262em;vertical-align:-0.345em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8451em;"><span style="top:-2.655em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0715em;">K</span></span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.394em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.345em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop op-symbol small-op" style="position:relative;top:0em;">∑</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.9812em;"><span style="top:-2.4003em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.2029em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0715em;">K</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2997em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord">ℓ</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em;">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></td>
+<td>字段内 token 概率的几何平均；平均的是对数概率。</td>
+</tr>
+<tr>
+<td>margin</td>
+<td><span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>p</mi><mn>1</mn></msub><mo>−</mo><msub><mi>p</mi><mn>2</mn></msub><mo stretchy="false">)</mo><mi mathvariant="normal">/</mi><mo stretchy="false">(</mo><msub><mi>p</mi><mn>1</mn></msub><mo>+</mo><msub><mi>p</mi><mn>2</mn></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(p_1-p_2)/(p_1+p_2)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord">/</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span></td>
+<td>首位置上，全词表中最优与次优 token 的相对概率差。</td>
+</tr>
+</tbody></table></div>
+<p><em>定义见<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=19">论文 §4.1、附录 A.6</a>。<span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">p_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 和 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">p_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是 <strong>同一个生成位置</strong> 上的两个候选概率，<span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>p</mi><mn>2</mn></msub></mrow><annotation encoding="application/x-tex">p_2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">2</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 不是答案中第二个 token 的概率。margin 可译为“间隔”，这里没有对多个完整答案做边缘概率求和。</em></p>
+<p>OCR+Image 条件下，表 3 的结果如下：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>模型</th>
+<th align="center">first-token：AUROC / ECE</th>
+<th align="center">margin：AUROC / ECE</th>
+<th align="center">mean-token：AUROC / ECE</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Gemma 3-12B</td>
+<td align="center"><strong>0.64</strong> / 0.36</td>
+<td align="center">0.63 / 0.35</td>
+<td align="center">0.60 / 0.36</td>
+</tr>
+<tr>
+<td>Qwen 3.6-27B</td>
+<td align="center"><strong>0.62</strong> / 0.21</td>
+<td align="center">0.61 / 0.21</td>
+<td align="center">0.59 / 0.21</td>
+</tr>
+</tbody></table></div>
+<p><strong>首 token 在 AUROC 上领先平均方法 0.03–0.04，领先 margin 约 0.01；ECE 没有同步优势。</strong> “始终优于”的准确读法是：论文比较的这两个模型上，首 token 的排序指标都排第一。它没有证明所有长答案都应只看首 token，也没有建立这些小差距在所有设置下都具有统计显著性。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=9">论文，表 3、§5.2</a></p>
+<p>这里有些读者可能会疑惑： <strong>只看开头，为什么反而比把整个字段都算进去更好？</strong> 论文把首 token 解释为模型开始生成该值时的选择确定程度，但没有通过实验确认其领先机制。一个可能原因是：后续 token 的概率以已经生成的前缀为条件，即使开头选错，后续仍可能顺畅地延续这个错误答案；将这些高概率加入平均，会弱化最初的不确定信号。</p>
+<p>用一个 <strong>解释性构造算例</strong> 说明：假设首 token 的对数概率为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">-2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">−</span><span class="mord">2</span></span></span></span></span>，其余四个 token 的对数概率都接近 0。首 token 分数为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>e</mi><mrow><mo>−</mo><mn>2</mn></mrow></msup><mo>≈</mo><mn>0.135</mn></mrow><annotation encoding="application/x-tex">e^{-2}\approx0.135</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">2</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.135</span></span></span></span></span>，五个 token 的平均分数却约为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>e</mi><mrow><mo>−</mo><mn>2</mn><mi mathvariant="normal">/</mi><mn>5</mn></mrow></msup><mo>≈</mo><mn>0.670</mn></mrow><annotation encoding="application/x-tex">e^{-2/5}\approx0.670</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.888em;"></span><span class="mord"><span class="mord mathnormal">e</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.888em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">−</span><span class="mord mtight">2/5</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">≈</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">0.670</span></span></span></span></span>。后续容易生成，并不直接意味着该字段在文档中抽取正确。这个算例只说明平均方法可能怎样改变分数；真实日期或金额也可能在后半段才发生歧义，首 token 同样可能漏掉关键信息。</p>
+<p>附录 A.9 还观察到，mean-token 在部分中间置信区间反而更贴近可靠性图的对角线。这再次限定了结果： <strong>首 token 是本文更好的 logprob 排序信号，不是经过验证的多 token 字段正确概率。</strong></p>
+</section>
+<section id="limitations"><h3>数据与结论的适用范围</h3>
+<p>ConfBench 从 75 份人工校正过的 FCC 发票出发，施加 20 种图像退化流水线。论文报告初步生成 1,500 个退化文档，经质量过滤保留 1,346 个，单次运行包含约 7 万至 13 万个实体评估。加入噪声的目的，是让模型同时遇到容易与困难的字段：如果只测清晰文档，大部分输出都正确，就难以检验模型是否会对错误同样报高分。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=3">论文，§3</a></p>
+<p>理解四项发现时，最需要保留三个边界。第一， <strong>大量退化变体仍来自 75 份源文档</strong> ，覆盖一个领域、一类大体版式和一种语言，不能直接代表合同、手写表格或多语言材料。第二， <strong>人工退化旨在覆盖难度范围</strong> ，并非复现生产环境中的真实噪声比例；真实部署的阈值和错误捕获收益需要重新验证。第三， <strong>跨模型比较并非完全相同的输出条件</strong> ：输出预算、生成的行项目数量和可用于置信度评价的实体数会变化；逐实体计算也不意味着各模型面对的有效字段集合完全一致。因此，小幅跨模型差距应谨慎解释。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=10">论文，Limitations、附录 A.6</a></p>
+<p>作为阅读结论，可以把本文的实际启示归纳为：文档抽取应同时评价抽取质量与置信度质量；在本基准上优先考虑 OCR 与图像结合，逐模型比较自报与 logprob 分数；固定复核预算重点看排序与错误捕获，使用概率阈值时再验证绝对校准。四项发现提供了可检验的起点，具体取舍仍由目标文档及复核规则决定。</p>
+</section>
+<section id="datasets"><h3>数据集获取</h3>
+<p><strong>问：RealKIE-FCC-Verified 与 ConfBench 在哪里下载？</strong></p>
+<p><strong>答：</strong> 原始人工校正语料见 <a class="inline-link" href="https://huggingface.co/datasets/amazon-agi/RealKIE-FCC-Verified">amazon-agi/RealKIE-FCC-Verified</a>，退化基准见 <a class="inline-link" href="https://huggingface.co/datasets/amazon/ConfBench">amazon/ConfBench</a>。两个页面均提供文件列表；前者的记录包含逐页图像路径、OCR 文本、JSON schema 和标准答案。阅读本文实验数字时以所给论文版本为准，使用在线数据复现时则应记录下载版本，并按实际文件与元数据确认样本组成。</p>
+</section>
+<!-- CONFBENCH_ARTICLE_END -->
+            <div class="reader-actions"><a href="../">← 返回论文阅读</a><a href="#main">回到顶部 ↑</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

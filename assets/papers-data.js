@@ -10,6 +10,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction",
+    shortName: "ConfBench：文档抽取置信度",
+    aliases: ["置信度校准", "VLM", "文档抽取", "OCR", "AUROC", "ECARB", "first-token"],
+    category: "evaluation",
+    year: "2026",
+    venue: "arXiv",
+    summary: "结论先行，围绕输入模态、模型能力、绝对校准与首 token 排序的四项发现解读文档抽取置信度。",
+    articleUrl: "confbench/",
+    url: "https://arxiv.org/abs/2608.01792v1"
+  },
+  {
     title: "PiKV: KV Cache Management System for Mixture of Experts",
     shortName: "PiKV",
     aliases: ["MoE", "专家分片", "KV 缓存", "稀疏路由", "缓存调度", "FPGA"],

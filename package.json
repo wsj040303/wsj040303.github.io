@@ -25,7 +25,9 @@
     "build:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs",
     "check:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs --check",
     "build:pikv": "node scripts/render-pikv.mjs",
-    "check:pikv": "node scripts/render-pikv.mjs --check"
+    "check:pikv": "node scripts/render-pikv.mjs --check",
+    "build:confbench": "node scripts/render-confbench.mjs",
+    "check:confbench": "node scripts/render-confbench.mjs --check"
   },
   "devDependencies": {
     "katex": "^0.16.47",

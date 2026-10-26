@@ -39,6 +39,7 @@ window.PAPER_ENTRIES = [
     category: "evaluation",
     year: "2025",
     venue: "TMLR",
+    rating: 2,
     summary: "从答案 token 的概率解释校准与正确性排序的差别，结合原图、算例和统计证据分析选择性弃权。",
     articleUrl: "chat-llm-calibration/",
     url: "https://arxiv.org/abs/2402.13213v4"

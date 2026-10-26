@@ -1,5 +1,6 @@
 // Edit this list to add reading records. Sample entries are public papers, not personal reading claims.
 window.PAPER_CATEGORIES = [
+  { id: "evaluation", name: "评测与可靠性" },
   { id: "training", name: "训练与对齐" },
   { id: "inference", name: "推理引擎" },
   { id: "operators", name: "算子与内存" },
@@ -8,6 +9,17 @@ window.PAPER_CATEGORIES = [
 ];
 
 window.PAPER_ENTRIES = [
+  {
+    title: "Probabilities of Chat LLMs Are Miscalibrated but Still Predict Correctness on Multiple-Choice Q&A",
+    shortName: "聊天模型概率校准与正确性预测",
+    aliases: ["MSP", "AUROC", "ECE", "calibration", "概率校准", "正确性预测", "选择性弃权"],
+    category: "evaluation",
+    year: "2025",
+    venue: "TMLR",
+    summary: "从答案 token 的概率解释校准与正确性排序的差别，结合原图、算例和统计证据分析选择性弃权。",
+    articleUrl: "chat-llm-calibration/",
+    url: "https://arxiv.org/abs/2402.13213v4"
+  },
   {
     title: "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
     shortName: "DeepSeek-R1",

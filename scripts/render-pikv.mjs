@@ -15,17 +15,11 @@ const escapeHtml = (value) => String(value)
   .replaceAll('"', "&quot;");
 
 const sectionIds = new Map([
-  ["论文的问题与主要工作", "research-question"],
-  ["研究背景：KV 访问与 MoE 计算的区别", "background"],
-  ["总体流程：一次查询如何经过四个模块", "execution"],
-  ["专家分片与路由：让选择决定访问范围", "routing"],
-  ["路由收益：计算量、读取流量与重用距离", "routing-cost"],
-  ["压缩表示：空间收益、重建误差与单步耗时", "compression"],
-  ["页调度：有限容量下的保留与加载", "scheduling"],
-  ["内存模型：两项存储与最优页大小的前提", "memory-model"],
-  ["FPGA 扩展：GPU 计算与内存侧管理的分工", "fpga"],
-  ["实验证据、创新范围与结论", "evidence"],
-  ["延伸问答", "further-questions"],
+  ["主要工作与优化目标", "research-question"],
+  ["路由：缩小本次查询的 KV 访问范围", "routing"],
+  ["压缩：减少每条 KV 的存储与搬运量", "compression"],
+  ["调度：让有限容量优先保留有用的 KV 页", "scheduling"],
+  ["三者协作与论文的适用边界", "evidence"],
 ]);
 
 const source = fs.readFileSync(sourcePath, "utf8");

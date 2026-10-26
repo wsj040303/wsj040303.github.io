@@ -87,7 +87,7 @@
 </section>
 <section id="task"><h3>任务与方法：从发票抽取字段，再为字段打分</h3>
 <h4 id="task-1">输入文档与固定字段结构</h4>
-<p>论文中的 <strong>IDP 是 Intelligent Document Processing，即智能文档处理</strong> 。中译版某处把 IDP 译成了“身份证明”，英文原文的应用背景实际是从发票、合同等企业文档中提取结构化信息，再将不确定的结果转交人工复核。本文实验具体使用美国联邦通信委员会（FCC）公开记录中的政治广告发票。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=3">论文，§1、§3</a></p>
+<p>论文中的 <strong>IDP 是 Intelligent Document Processing，即智能文档处理</strong> 。</p>
 <p>这里的任务属于 <strong>关键信息抽取</strong> （Key Information Extraction，KIE）：根据预先指定的 schema，也就是字段名称、类型及含义组成的输出结构，从文档中找到相应的值。模型可接收 OCR 识别文本、文档图像，或两者结合。六个文档级字段包括代理机构、广告主、总金额、付款条款、代理佣金和应付净额；此外还有长度可变的 <code>LineItems</code> 数组，每条记录含日期、播出日（Days）、描述、费率等五个子字段。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=15">论文，附录 A.5</a></p>
 <p>下面只展示输出的一部分， <strong>这是解释性构造示例，不是论文中的真实预测</strong> 。数组里的两个对象代表两个行项目；同名子字段通过所属对象区分。</p>
 <figure class="code-block"><pre><code>{
@@ -100,8 +100,6 @@
   ]
 }
 </code></pre></figure>
-<p>这里有些读者可能会疑惑： <strong>这是否只是 OCR 识别，看到什么就抄什么？</strong> OCR 提供文字识别结果；抽取模型还要将内容绑定到正确的业务字段。例如，发票里的几个金额分别可能是总额、佣金和应付净额，表格中相邻的描述与费率还需要归属于同一行。因此，任务包含字段语义判断和表格结构理解。它使用预定义 schema，论文没有将自动发现 schema 或复杂业务语义转换作为研究重点。日期格式等差异主要在评估时通过类型比较器处理。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=18">论文，附录 A.5</a></p>
-<p>论文的完整流程还保留了“先分类文档，再选择抽取 schema”这一步。不过基准只有 FCC 发票一类，作者报告分类始终正确，所以实验没有检验多种文档之间选择 schema 的能力。Image Only 配置的抽取阶段直接接收图像，文字识别与理解由视觉语言模型承担；只有启用 OCR 输入时，抽取模型才会读到上游 OCR 的结果。</p>
 <h4 id="task-2">两类置信度与多 token 字段</h4>
 <p>论文比较两条路线： <strong>verbalized confidence（显式自报置信度）</strong> 让模型在回答中写出概率； <strong>logprob confidence（对数概率置信度）</strong> 从生成 token 时的概率计算字段分数。</p>
 <figure class="paper-figure"><a class="inline-link" href="images/原文图2-两类置信度估计.png" aria-label="打开原尺寸论文图片"><img src="images/原文图2-两类置信度估计.png" alt="原文图2：上方为联合抽取与自报置信度，下方为生成字段后读取token概率" loading="lazy" decoding="async"></a><figcaption>原文图 2：两条路线都按实体输出分数。上方在一次调用中生成候选与概率；下方先生成结构化答案，再由各字段值对应的 token 概率计算分数。截取自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=6">论文 p.6</a>。</figcaption></figure>
@@ -111,14 +109,8 @@
 <p>两种方法也存在实验上的差别：自报方法要求模型考虑候选并打分，可能改变最终抽取内容；logprob 的打分发生在生成之后。因此，表 3 中同一个模型使用两种方法时，抽取质量不完全相同。论文只在 Qwen 3.6-27B 和 Gemma 3-12B 上比较了两条路线，因为这些实验配置能获得 token 概率；这是本文的接口和算力条件，不能概括成 logprob 在原理上只适用于开放权重模型。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=19">论文，§5.2、附录 A.6</a></p>
 </section>
 <section id="metrics"><h3>评价对象：字段正确性、分数排序与绝对校准</h3>
-<p><strong>论文中的“实体”是一个字段值，或某个行项目中的一个子字段值。</strong> 模型输出虽然由连续的 token 构成，评测会先解析成结构化字段，再逐个与标准答案比较。长字段的置信度衡量的是该字段的正确性，并不直接代表整个 JSON 全部正确。</p>
-<p>附录 A.5 对标签生成的说明是：</p>
-<blockquote>
-<p>“For calibration, each score is converted to a binary correctness label using a per-field acceptance threshold, and paired with the entity’s confidence score.”</p>
-</blockquote>
-<p>这段原文中的 score 指 <strong>预测值与标准答案的相似度</strong> 。字符串使用字符级相似度，数值比较允许 1% 容差，日期按日历意义比较；行项目先配对，再评价各子字段。相似度平均得到 <strong>WOA（Weighted Overall Accuracy，加权整体准确率）</strong> ，本文对所有字段使用相同权重；评价置信度时，再用各字段的接受阈值把相似度变成正确或错误标签。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=18">论文，§4.2、附录 A.5</a></p>
-<p>因此， <strong>WOA 0.75 不能直接读成“75% 的字段被二值判定为正确”</strong> ：WOA 包含部分匹配得分。F1 则基于字段接受与拒绝计算，二者出现较大差距有指标定义上的原因。也不能用 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><mrow><mi mathvariant="normal">W</mi><mi mathvariant="normal">O</mi><mi mathvariant="normal">A</mi></mrow></mrow><annotation encoding="application/x-tex">1-\mathrm{WOA}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord"><span class="mord mathrm">WOA</span></span></span></span></span></span> 直接代替错误字段比例。</p>
-<p>有了每个字段的“置信分数、对错标签”数据对，两个核心指标分别回答不同问题：</p>
+<p><strong>论文判断抽取结果是否正确的单位是实体：从表格或文档中提取的一个字段值，就是一个实体。</strong> 例如，总金额是一个实体，某个行项目中的费率也是一个实体。一个字段可以包含多个 token，但评价时作为一个整体与标准答案比较，并对应一个置信分数。</p>
+<p>AUROC 和 ECE 都基于这些实体的置信分数与对错标签计算，分别衡量排序能力与绝对校准：</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -140,18 +132,16 @@
 </tbody></table></div>
 <p><em>定义见<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=6">论文 §4.2</a>。AUROC 衡量区分能力；ECE 衡量分组后的数值偏差，结果也受分组方式影响。</em></p>
 <p>论文正文给出一个很直观的区分：正确字段都得 0.99、错误字段都得 0.90，排序完全正确，但错误字段的置信度严重偏高；反过来，若一批字段有 70% 正确，模型对所有字段都报 0.70，平均校准可以很好，却无法帮助挑出任何更可能出错的字段。 <strong>校准好和排序好可以同时发生，也可以彼此分离。</strong></p>
-<p>论文进一步定义 <strong>ECARB（Error Capture at Review Budget，给定复核预算下的错误捕获增益）</strong> ：按置信度从低到高复核一定比例的字段，找到的错误数除以随机复核同样数量字段时的期望错误数。附录 A.7 的算例是：100 个预测中有 20 个错误，复核 30 个；随机抽样平均找到 6 个错误，按置信度挑选若找到 15 个，则 ECARB 为 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>15</mn><mi mathvariant="normal">/</mi><mn>6</mn><mo>=</mo><mn>2.5</mn></mrow><annotation encoding="application/x-tex">15/6=2.5</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">15/6</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.5</span></span></span></span></span>。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=20">论文，式（1）、附录 A.7</a></p>
-<p>表 3 的 Opus 得分为 2.43，按论文的比例定义，可换算成约 <span class="math-inline"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0.30</mn><mo>×</mo><mn>2.43</mn><mo>=</mo><mn>72.9</mn><mi mathvariant="normal">%</mi></mrow><annotation encoding="application/x-tex">0.30\times2.43=72.9\%</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">0.30</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">2.43</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8056em;vertical-align:-0.0556em;"></span><span class="mord">72.9%</span></span></span></span></span> 的错误被这 30% 的复核量覆盖。这个换算说明的是 <strong>捕获错误的比例</strong> ，不代表人工工时减少了 72.9%；字段长度和复核难度可能不同。30% 也是论文选取的展示点，并非推荐给所有系统的预算。</p>
 </section>
 <section id="modality"><h3>发现一：OCR 文本与图像结合更有效</h3>
 <p><strong>在本文实验中，OCR+Image 同时改善了抽取质量和置信度的区分能力。</strong> 三种输入配置里，OCR Only 居中，Image Only 最弱；小模型对是否提供 OCR 更敏感。<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=7">论文，§5.1</a></p>
 <figure class="paper-figure"><a class="inline-link" href="images/原文图3-输入模态比较.png" aria-label="打开原尺寸论文图片"><img src="images/原文图3-输入模态比较.png" alt="原文图3：横轴为抽取质量WOA，纵轴为置信度区分能力AUROC，不同形状表示输入模态" loading="lazy" decoding="async"></a><figcaption>原文图 3：颜色区分模型，方形表示 OCR，圆形表示图像，三角形表示 OCR+Image；实心与空心分别表示自报与首 token logprob 方法。截取自<a class="inline-link" href="https://arxiv.org/pdf/2608.01792v1#page=7">论文 p.7</a>。</figcaption></figure>
 
-<p>图的横轴向右表示抽取更准确，纵轴向上表示更能区分正确与错误字段。比较同一颜色、同一填充方式下的不同形状，结合 OCR 的三角形通常位于更右上方。论文报告，从 OCR+Image 改为 Image Only，Gemma 3-12B 的 AUROC 降低约 0.06，Opus 4.6 降低约 0.03。这说明较强模型仅凭图像也能保留较多有效信号，较弱模型更依赖额外的文字输入。</p>
+<p>图的横轴 WOA（Weighted Overall Accuracy，加权整体准确率）衡量字段值与标准答案的平均相似程度，越往右表示抽取质量越高；纵轴 AUROC 越往上表示更能区分正确与错误字段。比较同一颜色、同一填充方式下的不同形状，结合 OCR 的三角形通常位于更右上方。论文报告，从 OCR+Image 改为 Image Only，Gemma 3-12B 的 AUROC 降低约 0.06，Opus 4.6 降低约 0.03。这说明较强模型仅凭图像也能保留较多有效信号，较弱模型更依赖额外的文字输入。</p>
 <p>输入中的 OCR 信息不只有识别后的文字。附录 A.5 说明，Amazon Textract 的输出被序列化为按阅读顺序排列的 <strong><code>(word, confidence)</code> 对</strong> ，即识别词与 OCR 置信度；OCR+Image 还同时提供文档图像。文字、识别可靠程度和视觉版式可以相互补充，这是结果的一种合理解释。实验没有单独移除 OCR 置信度，因此不能把全部提升只归因于“多了一份文本”，也不能分离各部分的独立贡献。</p>
 </section>
 <section id="capability"><h3>发现二：能力层级有参考价值，参数量不能单独预测</h3>
-<p>以下整理表 3 中所有模型的 <strong>自报置信度、OCR+Image</strong> 结果。WOA 越高越好，AUROC 越高越好，ECE 越低越好，ECARB 越高表示同样复核量能找到更多错误。</p>
+<p>以下整理表 3 中所有模型的 <strong>自报置信度、OCR+Image</strong> 结果。WOA 越高越好，AUROC 越高越好，ECE 越低越好。ECARB@30% 表示复核最低分的 30% 字段时，相比随机复核同样数量字段的错误捕获倍数，越高越好。</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>

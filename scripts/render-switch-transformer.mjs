@@ -54,10 +54,6 @@ const sectionIds = new Map([
   [
     "局限与结论",
     "limitations"
-  ],
-  [
-    "延伸问答",
-    "further-questions"
   ]
 ]);
 

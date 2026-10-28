@@ -10,6 +10,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity",
+    shortName: "Switch Transformers",
+    aliases: ["MoE", "Top-1", "单专家路由", "稀疏专家", "负载均衡", "专家并行"],
+    category: "training",
+    year: "2022",
+    venue: "JMLR",
+    summary: "围绕原有问题、优化策略与实验证据，解释单专家路由、容量控制、稳定训练和万亿参数扩展。",
+    articleUrl: "switch-transformer/",
+    url: "https://jmlr.org/papers/v23/21-0998.html"
+  },
+  {
     title: "Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction",
     shortName: "ConfBench：文档抽取置信度",
     aliases: ["置信度校准", "VLM", "文档抽取", "OCR", "AUROC", "ECARB", "first-token"],

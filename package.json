@@ -27,7 +27,9 @@
     "build:pikv": "node scripts/render-pikv.mjs",
     "check:pikv": "node scripts/render-pikv.mjs --check",
     "build:confbench": "node scripts/render-confbench.mjs",
-    "check:confbench": "node scripts/render-confbench.mjs --check"
+    "check:confbench": "node scripts/render-confbench.mjs --check",
+    "build:switch-transformer": "node scripts/render-switch-transformer.mjs",
+    "check:switch-transformer": "node scripts/render-switch-transformer.mjs --check"
   },
   "devDependencies": {
     "katex": "^0.16.47",

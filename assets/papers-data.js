@@ -12,6 +12,7 @@ window.PAPER_ENTRIES = [
   {
     title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity",
     shortName: "Switch Transformers",
+    rating: 3.5,
     aliases: ["MoE", "Top-1", "单专家路由", "稀疏专家", "负载均衡", "专家并行"],
     category: "training",
     year: "2022",
@@ -27,6 +28,7 @@ window.PAPER_ENTRIES = [
     category: "evaluation",
     year: "2026",
     venue: "arXiv",
+    rating: 2.5,
     summary: "结论先行，围绕输入模态、模型能力、绝对校准与首 token 排序的四项发现解读文档抽取置信度。",
     articleUrl: "confbench/",
     url: "https://arxiv.org/abs/2608.01792v1"

@@ -29,7 +29,9 @@
     "build:confbench": "node scripts/render-confbench.mjs",
     "check:confbench": "node scripts/render-confbench.mjs --check",
     "build:switch-transformer": "node scripts/render-switch-transformer.mjs",
-    "check:switch-transformer": "node scripts/render-switch-transformer.mjs --check"
+    "check:switch-transformer": "node scripts/render-switch-transformer.mjs --check",
+    "build:deepseek-moe": "node scripts/render-deepseek-moe.mjs",
+    "check:deepseek-moe": "node scripts/render-deepseek-moe.mjs --check"
   },
   "devDependencies": {
     "katex": "^0.16.47",

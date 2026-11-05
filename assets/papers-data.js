@@ -10,6 +10,17 @@ window.PAPER_CATEGORIES = [
 
 window.PAPER_ENTRIES = [
   {
+    title: "DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models",
+    shortName: "DeepSeekMoE",
+    aliases: ["细粒度专家分割", "共享专家隔离", "专家专业化", "MoE"],
+    category: "training",
+    year: "2024",
+    venue: "ACL",
+    summary: "解释细粒度专家分割与共享专家隔离如何提高专家专业化，并核对 2B 验证与 16B 扩展的实验证据。",
+    articleUrl: "deepseek-moe/",
+    url: "https://arxiv.org/abs/2401.06066"
+  },
+  {
     title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity",
     shortName: "Switch Transformers",
     rating: 3.5,

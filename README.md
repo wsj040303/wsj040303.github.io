@@ -56,3 +56,7 @@ Nano-vLLM 解读的正文源文件是 [第 1 章](notes/inference/nano-vllm/01-o
 ## 编辑 Switch Transformers 阅读报告
 
 正文源文件是 [papers/switch-transformer/article.md](papers/switch-transformer/article.md)，原文图放在同目录的 `images/`。修改后运行 `npm run build:switch-transformer` 生成 HTML，再运行 `npm run check:switch-transformer` 核对正文、目录和公式。
+
+## 编辑 DeepSeekMoE 阅读报告
+
+正文源文件是 [papers/deepseek-moe/article.md](papers/deepseek-moe/article.md)，原文图放在同目录的 `images/`。修改后运行 `npm run build:deepseek-moe` 生成 HTML，再运行 `npm run check:deepseek-moe` 核对正文、目录和公式。

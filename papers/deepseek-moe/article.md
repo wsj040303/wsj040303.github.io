@@ -30,17 +30,11 @@ $$
 
 其中 $g_{i,t}$ 是第 $i$ 个专家对第 $t$ 个 token 的门控值，$s_{i,t}$ 是 token 与专家的亲和度，$\mathrm{Topk}(\cdot,K)$ 取最高的 $K$ 个，$e_i^l$ 是第 $l$ 层第 $i$ 个专家的质心（centroid）。论文指出：“for each token, only $K$ out of $N$ gate values are nonzero. This sparsity property ensures computational efficiency within an MoE layer.”
 
-这里有些读者可能会疑惑：**多个专家算完是取平均吗？筛选是不是做了两次？** 结果是按门控值加权求和，并非取平均；路由只有一次，分三步：按式 (5) 给全部 $N$ 个专家打分；按式 (4) 留下最高的 $K$ 个、其余门控值置零；只对门控值非零的专家运行 FFN，输出乘门控值后求和，再加残差。置零意味着该专家不计算，所以参数按 $N$ 计、计算按 $K$ 计。下面是解释性算例（非论文数据）：$N=4$、$K=2$、亲和度 $s=[0.50,\,0.30,\,0.15,\,0.05]$ 时，$g=[0.50,\,0.30,\,0,\,0]$，输出为 $0.50\,\mathrm{FFN}_1(u)+0.30\,\mathrm{FFN}_2(u)+u$，专家 3、4 不运行，入选门控值之和 0.8 小于 1：softmax 在全部 $N$ 个专家上归一化，式 (4) 又直接取 $s_{i,t}$，没有在入选的 $K$ 个之间重新归一化。训练时的负载均衡损失（§3.3）按各专家被选中的频率与平均亲和度施加约束，推理时没有第二次筛选。[论文，§2、§3.3](https://aclanthology.org/2024.acl-long.70.pdf#page=4)
-
 入选专家的门控值就是它的亲和度，亲和度来自 token 隐状态与质心的内积再经 softmax：把 $N$ 个质心按行堆成 $N\times d$ 的矩阵，乘以 $u_t^l$ 得到 $N$ 个内积，相当于一次线性变换。论文只称 $e_i^l$ 为质心，没有给出聚类或统计定义，本文按随训练更新的可学习向量理解（附录 A.1 说明所有可学习参数以标准差 0.006 随机初始化）；$e_i^l$ 带有层号 $l$，每一层各有一组，逐层独立路由。[论文，§2、附录 A.1](https://aclanthology.org/2024.acl-long.70.pdf#page=14)
 
 ### 现有 MoE 的两个问题
 
 论文 §1 把 GShard 一类设计的问题归为两点。知识混杂（knowledge hybridity）：“tokens assigned to a specific expert will be likely to cover diverse knowledge”，同一专家的参数要容纳差别很大的几类知识，难以同时利用。知识冗余（knowledge redundancy）：“tokens assigned to different experts may require common knowledge”，多个专家各自学习同一份公共知识。二者限制了专家专业化，论文将其定义为 “each expert acquires non-overlapping and focused knowledge”：*focused*（集中）与知识混杂相对，*non-overlapping*（互不重叠）与知识冗余相对。这是论文的动机性假设，论文没有直接测量单个专家学到了什么，后文实验检验的是按这两点设计的结构能否取得更好的结果。[论文，§1](https://aclanthology.org/2024.acl-long.70.pdf#page=1)
-
-## 问题定义
-
-论文要解决的问题是：专家参数总量和每个 token 的激活参数量固定时，怎样划分和激活专家，使每个专家的知识更集中、互不重叠。验证实验让 GShard、DeepSeekMoE 和消融中的各配置取相同的两个预算：专家参数总量等于 16 个标准 FFN，激活的专家参数（共享专家与被选中的路由专家之和）等于 2 个标准 FFN；**标准 FFN** 指稠密 Transformer 中单个 FFN 的参数规模，在此用作计量单位。切分前每个专家恰为 1 个标准 FFN，所以 $N=16$、$K=2$ 同时是专家数和这两个预算。设计变量只有切分份数 $m$ 与共享专家数 $K_s$：GShard 是 $m=1$、$K_s=0$，DeepSeekMoE 取 $m=4$、$K_s=1$，即 $mN=64$ 个专家，其中 63 个路由专家，每次激活 $mK-K_s=7$ 个。这些模型使用同一语料和训练超参数，性能差异因而来自专家的划分与激活方式。[论文，§4.1–4.2](https://aclanthology.org/2024.acl-long.70.pdf#page=4)
 
 ## 方法原理
 

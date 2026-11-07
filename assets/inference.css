@@ -1,6 +1,7 @@
-/* AI Infra catalog: four topics on wide screens, then two and one. */
-.topic-list.inference-topics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* AI Infra catalog: five topics, three per row on wide screens, then two and one. */
+.topic-list.inference-topics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .topic-list.inference-topics .topic-card { min-height: 190px; }
+.topic-list.inference-topics .topic-card:last-child { grid-column: span 2; }
 .topic-list.inference-single { grid-template-columns: minmax(0, 1fr); }
 .topic-list.inference-single .topic-card { max-width: 750px; }
 
@@ -42,6 +43,7 @@
 }
 @media (max-width: 650px) {
   .topic-list.inference-topics { grid-template-columns: minmax(0, 1fr); }
+  .topic-list.inference-topics .topic-card:last-child { grid-column: auto; }
   .engine-article .engine-code.is-complete pre { max-height: 36rem; }
   .engine-article > p, .engine-article section p, .engine-article section ul, .engine-article section ol { font-size: 17px; }
   .engine-article section h3 { font-size: 24px; padding: 13px 15px; }

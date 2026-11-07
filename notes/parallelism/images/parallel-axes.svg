@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">五种并行维度</title>
+  <desc id="desc">数据并行切 batch，张量并行切层内张量，流水线并行切层，专家并行切 MoE 专家，上下文并行切序列。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3b7651" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .panel-title { font-size: 21px; font-weight: 720; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .label { font-size: 13px; font-weight: 600; fill: #39714d; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .arrow { fill: none; stroke: #3b7651; stroke-width: 2.2; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="704" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="58" class="title">五种并行维度</text>
+  <text x="43" y="86" class="subtitle">每种维度切的是不同对象；通信原语和放置位置随切法改变。</text>
+
+  <!-- DP panel -->
+  <rect x="40" y="118" width="350" height="250" rx="18" fill="#f4f8ee" stroke="#ccddc6" stroke-width="2"/>
+  <text x="62" y="154" class="panel-title">DP · 切 batch</text>
+  <text x="62" y="178" class="body">每张卡保留完整模型，处理不同的数据分片</text>
+  <g>
+    <rect x="62" y="202" width="68" height="58" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <rect x="70" y="212" width="52" height="8" rx="3" fill="#7aab6e"/>
+    <rect x="70" y="226" width="52" height="8" rx="3" fill="#9cc48f"/>
+    <rect x="70" y="240" width="52" height="8" rx="3" fill="#b9d8ad"/>
+    <text x="96" y="276" text-anchor="middle" class="label">GPU 0</text>
+    <text x="96" y="294" text-anchor="middle" class="tiny">B1</text>
+
+    <rect x="142" y="202" width="68" height="58" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <rect x="150" y="212" width="52" height="8" rx="3" fill="#7aab6e"/>
+    <rect x="150" y="226" width="52" height="8" rx="3" fill="#9cc48f"/>
+    <rect x="150" y="240" width="52" height="8" rx="3" fill="#b9d8ad"/>
+    <text x="176" y="276" text-anchor="middle" class="label">GPU 1</text>
+    <text x="176" y="294" text-anchor="middle" class="tiny">B2</text>
+
+    <rect x="222" y="202" width="68" height="58" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <rect x="230" y="212" width="52" height="8" rx="3" fill="#7aab6e"/>
+    <rect x="230" y="226" width="52" height="8" rx="3" fill="#9cc48f"/>
+    <rect x="230" y="240" width="52" height="8" rx="3" fill="#b9d8ad"/>
+    <text x="256" y="276" text-anchor="middle" class="label">GPU 2</text>
+    <text x="256" y="294" text-anchor="middle" class="tiny">B3</text>
+
+    <rect x="302" y="202" width="68" height="58" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <rect x="310" y="212" width="52" height="8" rx="3" fill="#7aab6e"/>
+    <rect x="310" y="226" width="52" height="8" rx="3" fill="#9cc48f"/>
+    <rect x="310" y="240" width="52" height="8" rx="3" fill="#b9d8ad"/>
+    <text x="336" y="276" text-anchor="middle" class="label">GPU 3</text>
+    <text x="336" y="294" text-anchor="middle" class="tiny">B4</text>
+  </g>
+  <text x="62" y="332" class="label">通信：梯度 All-Reduce</text>
+  <text x="62" y="352" class="tiny">每步一次，通信域可跨节点</text>
+
+  <!-- TP panel -->
+  <rect x="425" y="118" width="350" height="250" rx="18" fill="#f7efda" stroke="#dfd0a8" stroke-width="2"/>
+  <text x="447" y="154" class="panel-title">TP · 切层内张量</text>
+  <text x="447" y="178" class="body">同一层的权重矩阵按列或行切开</text>
+  <g>
+    <rect x="447" y="204" width="120" height="70" rx="8" fill="#ffffff" stroke="#c9b98e"/>
+    <line x1="477" y1="204" x2="477" y2="274" stroke="#c9b98e" stroke-dasharray="4 4"/>
+    <line x1="507" y1="204" x2="507" y2="274" stroke="#c9b98e" stroke-dasharray="4 4"/>
+    <line x1="537" y1="204" x2="537" y2="274" stroke="#c9b98e" stroke-dasharray="4 4"/>
+    <text x="507" y="197" text-anchor="middle" class="tiny">W</text>
+    <text x="477" y="292" text-anchor="middle" class="label">W1</text>
+    <text x="507" y="292" text-anchor="middle" class="label">W2</text>
+    <text x="537" y="292" text-anchor="middle" class="label">W3</text>
+    <text x="567" y="292" text-anchor="middle" class="label">W4</text>
+
+    <rect x="600" y="204" width="58" height="70" rx="8" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="629" y="236" text-anchor="middle" class="label">GPU</text>
+    <text x="629" y="256" text-anchor="middle" class="tiny">W1</text>
+    <rect x="668" y="204" width="58" height="70" rx="8" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="697" y="236" text-anchor="middle" class="label">GPU</text>
+    <text x="697" y="256" text-anchor="middle" class="tiny">W2</text>
+    <rect x="600" y="284" width="58" height="28" rx="7" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="629" y="303" text-anchor="middle" class="tiny">W3</text>
+    <rect x="668" y="284" width="58" height="28" rx="7" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="697" y="303" text-anchor="middle" class="tiny">W4</text>
+  </g>
+  <text x="447" y="332" class="label">通信：每层 All-Reduce</text>
+  <text x="447" y="352" class="tiny">量大，通常限制在 NVLink 域内</text>
+
+  <!-- PP panel -->
+  <rect x="810" y="118" width="350" height="250" rx="18" fill="#eef4e6" stroke="#c2d6b8" stroke-width="2"/>
+  <text x="832" y="154" class="panel-title">PP · 切层</text>
+  <text x="832" y="178" class="body">连续的层放进不同 stage，按流水线执行</text>
+  <g>
+    <rect x="842" y="202" width="96" height="18" rx="5" fill="#8fbb7f"/>
+    <rect x="842" y="224" width="96" height="18" rx="5" fill="#a4c996"/>
+    <rect x="842" y="246" width="96" height="18" rx="5" fill="#b9d8ad"/>
+    <rect x="842" y="268" width="96" height="18" rx="5" fill="#cde3c2"/>
+    <text x="890" y="215" text-anchor="middle" class="tiny">layers 0-1</text>
+    <text x="890" y="237" text-anchor="middle" class="tiny">layers 2-3</text>
+    <text x="890" y="259" text-anchor="middle" class="tiny">layers 4-5</text>
+    <text x="890" y="281" text-anchor="middle" class="tiny">layers 6-7</text>
+
+    <path class="arrow" d="M946 211 H982"/>
+    <path class="arrow" d="M946 235 H982"/>
+    <path class="arrow" d="M946 259 H982"/>
+    <path class="arrow" d="M946 281 H982"/>
+
+    <rect x="990" y="202" width="58" height="38" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="1019" y="226" text-anchor="middle" class="tiny">stage 0</text>
+    <rect x="990" y="244" width="58" height="38" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="1019" y="268" text-anchor="middle" class="tiny">stage 1</text>
+    <rect x="990" y="286" width="58" height="38" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="1019" y="310" text-anchor="middle" class="tiny">stage 2</text>
+    <text x="1058" y="310" class="tiny">…</text>
+  </g>
+  <text x="832" y="352" class="label">通信：相邻 stage 的 P2P 激活</text>
+
+  <!-- EP panel -->
+  <rect x="235" y="392" width="350" height="270" rx="18" fill="#f9f3e4" stroke="#e2d7bb" stroke-width="2"/>
+  <text x="257" y="428" class="panel-title">EP · 切专家</text>
+  <text x="257" y="452" class="body">MoE 的专家分散到不同 GPU，token 被路由过去</text>
+  <g>
+    <circle cx="272" cy="492" r="9" fill="#7fae72"/>
+    <circle cx="298" cy="492" r="9" fill="#7fae72"/>
+    <circle cx="324" cy="492" r="9" fill="#7fae72"/>
+    <text x="298" y="520" text-anchor="middle" class="tiny">tokens</text>
+
+    <path class="arrow" d="M340 492 H370"/>
+    <path d="M370 472 L398 492 L370 512 L342 492 Z" fill="#fffdf7" stroke="#c9b98e" stroke-width="2"/>
+    <text x="370" y="496" text-anchor="middle" class="tiny">Router</text>
+
+    <path class="arrow" d="M398 492 H430"/>
+    <rect x="438" y="464" width="60" height="56" rx="8" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="468" y="486" text-anchor="middle" class="tiny">E1</text>
+    <text x="468" y="504" text-anchor="middle" class="tiny">E2</text>
+    <rect x="508" y="464" width="60" height="56" rx="8" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="538" y="486" text-anchor="middle" class="tiny">E3</text>
+    <text x="538" y="504" text-anchor="middle" class="tiny">E4</text>
+    <text x="503" y="540" text-anchor="middle" class="label">All-to-All</text>
+  </g>
+  <text x="257" y="576" class="label">通信：Dispatch + Combine 两次 All-to-All</text>
+  <text x="257" y="598" class="tiny">专家负载不均会放大 straggler</text>
+  <text x="257" y="618" class="tiny">放置优先保证节点局部性</text>
+
+  <!-- CP panel -->
+  <rect x="625" y="392" width="535" height="270" rx="18" fill="#f2f6ec" stroke="#c6d9bd" stroke-width="2"/>
+  <text x="647" y="428" class="panel-title">CP · 切序列</text>
+  <text x="647" y="452" class="body">一条长序列切成多段，每张卡负责一段 token</text>
+  <g>
+    <rect x="647" y="488" width="110" height="34" rx="6" fill="#8fbb7f"/>
+    <rect x="759" y="488" width="110" height="34" rx="6" fill="#a8cd9a"/>
+    <rect x="871" y="488" width="110" height="34" rx="6" fill="#c0dcb3"/>
+    <rect x="983" y="488" width="110" height="34" rx="6" fill="#d6e8cc"/>
+    <text x="702" y="510" text-anchor="middle" class="tiny">tokens 0-S/4</text>
+    <text x="814" y="510" text-anchor="middle" class="tiny">S/4-2S/4</text>
+    <text x="926" y="510" text-anchor="middle" class="tiny">2S/4-3S/4</text>
+    <text x="1038" y="510" text-anchor="middle" class="tiny">3S/4-S</text>
+
+    <path class="arrow" d="M702 526 V558"/>
+    <path class="arrow" d="M814 526 V558"/>
+    <path class="arrow" d="M926 526 V558"/>
+    <path class="arrow" d="M1038 526 V558"/>
+
+    <rect x="647" y="566" width="110" height="36" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="702" y="589" text-anchor="middle" class="tiny">GPU 0 · Q0</text>
+    <rect x="759" y="566" width="110" height="36" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="814" y="589" text-anchor="middle" class="tiny">GPU 1 · Q1</text>
+    <rect x="871" y="566" width="110" height="36" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="926" y="589" text-anchor="middle" class="tiny">GPU 2 · Q2</text>
+    <rect x="983" y="566" width="110" height="36" rx="7" fill="#f4f8ee" stroke="#abc59f"/>
+    <text x="1038" y="589" text-anchor="middle" class="tiny">GPU 3 · Q3</text>
+
+    <path class="arrow" d="M757 584 H763"/>
+    <path d="M759 620 C820 640, 920 640, 981 620" fill="none" stroke="#83ad7a" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="870" y="656" text-anchor="middle" class="tiny">KV 沿环传递，或 All-to-All 重排</text>
+  </g>
+
+  <text x="42" y="694" class="tiny">组合关系：world_size = TP × PP × CP × EP × DP。通信量大的维度放在高带宽域内。</text>
+</svg>

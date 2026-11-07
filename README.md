@@ -49,6 +49,10 @@ my notes-especially for ai-infra
 
 Nano-vLLM 解读的正文源文件是 [第 1 章](notes/inference/nano-vllm/01-overview.md)、[llm_engine.py 解析](notes/inference/nano-vllm/02-llm-engine.md)、[sequence.py 解析](notes/inference/nano-vllm/03-sequence.md)、[scheduler.py 解析](notes/inference/nano-vllm/04-scheduler.md)、[block_manager.py 解析](notes/inference/nano-vllm/05-block-manager.md)、[model_runner.py 解析](notes/inference/nano-vllm/06-model-runner.md) 和 [qwen3.py 解析](notes/inference/nano-vllm/07-qwen3.md)，组件示意图放在同目录的 `images/`。编辑 Markdown 后，运行 `npm run build:inference` 生成对应 HTML；运行 `npm run check:inference` 检查生成页是否与 Markdown 一致。专题入口位于 `ai-infra/index.html → notes/inference/index.html → notes/inference/nano-vllm/index.html`。
 
+## 编辑并行计算专题
+
+正文源文件位于 `notes/parallelism/`，共 8 篇：总览、数据并行、张量并行、流水线并行、专家并行、序列与上下文并行、组合与选型，以及一篇面向普通博客读者的通俗总结。图片放在同目录的 `images/`。修改 Markdown 后，运行 `npm run build:parallelism` 生成对应 HTML；运行 `npm run check:parallelism` 检查生成页是否与 Markdown 一致。专题入口位于 `ai-infra/index.html → notes/parallelism/index.html`。
+
 ## 编辑 PiKV 阅读报告
 
 正文源文件是 [papers/pikv/article.md](papers/pikv/article.md)，原文图与表格截图放在同目录的 `images/`。修改后运行 `npm run build:pikv` 生成 HTML，再运行 `npm run check:pikv` 核对正文、目录与公式渲染。

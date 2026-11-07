@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Megatron-LM 的列并行与行并行、Attention 的按头切分、每层四次 All-Reduce，以及张量并行为什么通常留在 NVLink 域内。">
+    <meta name="theme-color" content="#0b2015">
+    <title>张量并行：在同一层内切开矩阵 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/inference.css?v=20261014-reader-layout">
+    <link rel="stylesheet" href="../../assets/parallelism.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">并行计算</a><span>/</span>张量并行：在同一层内切开矩阵</nav>
+        <div class="reader-heading"><h1>张量并行：在同一层内切开矩阵</h1><p class="article-deck">第 3 篇 · 列并行、行并行与每层通信账本</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">从一个 MLP 开始：列并行接行并行</a></li>
+<li><a href="#section-2">Attention：按头切分</a></li>
+<li><a href="#section-3">一个具体的显存例子</a></li>
+<li><a href="#section-4">序列并行：把 LayerNorm 和 Dropout 也切开</a></li>
+<li><a href="#section-5">词表并行</a></li>
+<li><a href="#section-6">TP 在推理中的样子</a></li>
+<li><a href="#section-7">什么时候用 TP</a></li>
+<li><a href="#section-8">参考资料</a></li>
+              </ol></nav>
+            </details>
+            <details class="chapter-panel series-panel" open><summary>本系列</summary>
+              <nav aria-label="并行专题文章列表"><ol class="series-list">
+<li><a href="01-overview.html">为什么需要并行：五种切法与一张通信地图</a></li>
+<li><a href="02-data-parallel.html">数据并行：从 DDP 到 ZeRO 与 FSDP</a></li>
+<li class="is-current"><a href="03-tensor-parallel.html" aria-current="page">张量并行：在同一层内切开矩阵</a></li>
+<li><a href="04-pipeline-parallel.html">流水线并行：把层分段，让 micro-batch 流动</a></li>
+<li><a href="05-expert-parallel.html">专家并行：MoE 的 All-to-All 与负载均衡</a></li>
+<li><a href="06-context-parallel.html">序列与上下文并行：把长序列切开</a></li>
+<li><a href="07-combination.html">组合与选型：3D/4D 并行怎样落到集群</a></li>
+<li><a href="08-for-readers.html">写给博客读者：大模型并行到底在解决什么</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<p>数据并行解决“副本太多”，张量并行解决“一层都放不下”。它的做法不是把模型按层分给不同卡，而是把同一层里的权重矩阵沿某个维度切开，每张卡只算矩阵的一部分，再用集合通信把部分结果拼成完整输出。Megatron-LM 的关键贡献，是找到了列并行与行并行的组合方式，使一个 Transformer 层在前后各只需一次通信，而不是每切一刀就同步一次。</p>
+<section id="section-1"><h3>从一个 MLP 开始：列并行接行并行</h3>
+<p>Transformer 的 MLP 可以写成 <code>Y = GeLU(XA) · B</code>，其中 <code>X</code> 的形状是 <code>[batch, seq, hidden]</code>，<code>A</code> 把 hidden 映射到中间维，<code>B</code> 再映射回 hidden。要把这个计算切到两张卡上，先看 <code>A</code> 怎么切。</p>
+<p>如果按行切 <code>A</code>，得到 <code>X1A1 + X2A2</code>，必须先把两个部分和加起来才能过 GeLU，因为 GeLU 是非线性的：<code>GeLU(X1A1 + X2A2) ≠ GeLU(X1A1) + GeLU(X2A2)</code>。这意味着 GeLU 之前就要一次同步，通信被夹在两层中间。</p>
+<p>Megatron 选择按列切 <code>A</code>：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>text</span></figcaption><pre><code>A = [A1, A2]
+Y = XA = [X A1, X A2] = [Y1, Y2]
+GeLU(Y) = [GeLU(Y1), GeLU(Y2)]</code></pre></figure>
+<p>每个 rank 独立计算自己那组输出列，GeLU 可以逐元素作用，不需要任何通信。接着把 <code>B</code> 按行切：</p>
+<figure class="engine-code"><figcaption>代码片段 <span>text</span></figcaption><pre><code>B = [B1; B2]
+Z = YB = Y1 B1 + Y2 B2</code></pre></figure>
+<p>每个 rank 得到一个部分和，最后做一次 All-Reduce 求和，得到完整的 <code>Z</code>。这就是 Megatron 的 <code>f</code> 与 <code>g</code> 两个共轭算子：<code>f</code> 在前向是恒等、反向是 All-Reduce；<code>g</code> 在前向是 All-Reduce、反向是恒等。MLP 的前向只有一次 All-Reduce，反向也只有一次。<a class="inline-link" href="https://arxiv.org/html/1909.08053v4" target="_blank" rel="noopener noreferrer">Megatron-LM 论文</a></p>
+<figure class="engine-figure"><a href="images/tp-mlp.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/tp-mlp.svg" alt="张量并行的 MLP：第一层按列切分，GeLU 各卡独立计算，第二层按行切分，最后一次 All-Reduce 求和。"></a><figcaption>张量并行的 MLP：第一层按列切分，GeLU 各卡独立计算，第二层按行切分，最后一次 All-Reduce 求和。 点击可打开完整图片。</figcaption></figure>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>线性层</th>
+<th>切权重的方式</th>
+<th>输入</th>
+<th>输出</th>
+<th>前向通信</th>
+<th>反向通信</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ColumnParallelLinear</td>
+<td>沿输出维（列）切</td>
+<td>完整复制</td>
+<td>按列切分</td>
+<td>无</td>
+<td>对输入梯度 All-Reduce</td>
+</tr>
+<tr>
+<td>RowParallelLinear</td>
+<td>沿输入维（行）切</td>
+<td>按列切分</td>
+<td>部分和</td>
+<td>All-Reduce 求和</td>
+<td>无</td>
+</tr>
+</tbody></table></div>
+<p>这张表的“共轭”关系值得记住：列并行把通信推到反向，行并行把通信推到前向。把两者串起来，通信就落在 MLP 的两端，而不是中间。</p>
+</section>
+<section id="section-2"><h3>Attention：按头切分</h3>
+<p>Self-Attention 天然适合张量并行，因为多头注意力的每个头本来就是独立的。Megatron 把 Q、K、V 的投影矩阵按列切分，每个 rank 负责一部分头；每个头在自己的卡上完成 <code>QK^T</code>、softmax 和 <code>AV</code>；输出投影矩阵再按行切分，最后 All-Reduce 一次。</p>
+<p>这样一来，一个 Transformer 层的前向有两次 All-Reduce：一次在 Attention 的输出投影后，一次在 MLP 的输出投影后。反向对应两次。合起来就是常说的“每层前向 2 次、反向 2 次 All-Reduce”。<a class="inline-link" href="https://arxiv.org/html/2104.04473v5" target="_blank" rel="noopener noreferrer">Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM</a></p>
+<p>每次 All-Reduce 的张量大小是 <code>batch × seq × hidden</code>。以 <code>batch=1, seq=4096, hidden=8192</code>、BF16 为例，一次通信约 64 MB；环形 All-Reduce 在每个 rank 上的通信量约为 <code>2 × (N-1)/N × 64 MB</code>。<code>N=8</code> 时约 112 MB，<code>N=16</code> 时约 120 MB。单看数字增长不大，但 All-Reduce 是同步操作，延迟和带宽争用会随组增大而恶化，这就是 TP 通常不超过单机 8 卡的原因。</p>
+</section>
+<section id="section-3"><h3>一个具体的显存例子</h3>
+<p>Llama-3 70B 的一层 FFN 里，<code>W1</code> 的形状是 <code>8192 × 28672</code>。FP16 下这个矩阵约 470 MB；如果再加上 FP32 主权重和 Adam 的 <code>m</code>、<code>v</code>，这一层带来的训练状态接近 5 GB。80 层堆起来，纯 DDP 显然放不下。<a class="inline-link" href="https://llm-infra-atlas.github.io/parallel/02_tp_sp/" target="_blank" rel="noopener noreferrer">LLM Infra Atlas · TP/SP</a></p>
+<p>切到 8 路 TP 后，每张卡只保留 <code>8192 × 3584</code> 的一片，权重降到约 59 MB，优化器状态也按同一比例缩小。代价是每层多出两次 All-Reduce，以及更小的 GEMM。TP 的收益和代价都来自这个“切得更细”：显存线性下降，单卡矩阵乘的 <code>M</code> 或 <code>N</code> 也线性下降，算术强度随之降低，通信占比上升。</p>
+</section>
+<section id="section-4"><h3>序列并行：把 LayerNorm 和 Dropout 也切开</h3>
+<p>标准 TP 只切了 Attention 和 MLP 的矩阵乘，LayerNorm、Dropout、残差相加这些逐点操作仍然在每个 rank 上保存完整的 <code>[batch, seq, hidden]</code> 激活。序列并行（Megatron Sequence Parallelism）把这些区域沿序列维切开：每个 rank 只保存 <code>1/TP</code> 的 token，LayerNorm 和 Dropout 在自己的分片上独立计算。</p>
+<p>代价是 TP 区域的边界要换一种通信方式。原本行并行输出的一次 All-Reduce，被替换成 Reduce-Scatter（把完整激活规约并散回各卡）加 All-Gather（进入 TP 区域前把序列拼回来）。通信量在理论上与 All-Reduce 相当，但激活值显存下降了，反向时能保存更多激活，或者用更大的 batch。Megatron 的 <code>--sequence-parallel</code> 打开的就是这个优化。<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Megatron Core · Parallelism Guide</a></p>
+<p>这里要注意命名。Megatron 的“序列并行”是 TP 的配套优化，切的是 TP 区域内没被切到的逐点操作；第 6 篇讲的“上下文并行 / 长序列并行”切的是整个注意力的序列维，两者不是同一件事。</p>
+</section>
+<section id="section-5"><h3>词表并行</h3>
+<p>Embedding 和最后的 LM Head 在词表维上很大。TP 还会把词表切开：每个 rank 只保存一部分 token 的 embedding，输出 logits 也只算自己那一段，最后对 logits 做 All-Reduce 或 All-Gather，再计算交叉熵。这样做的好处是 embedding 和 LM Head 的显存也随 TP 下降；坏处是词表大小必须能被 TP 整除，而且最后的 logits 通信量与词表大小成正比，词表很大时不容忽视。</p>
+</section>
+<section id="section-6"><h3>TP 在推理中的样子</h3>
+<p>推理没有梯度和优化器状态，TP 的显存收益主要来自权重和 KV Cache 的切分。vLLM 的 <code>tensor_parallel_size</code> 会把每层的权重按输出维切开，注意力头也按 rank 分配；每个 rank 只保存自己那部分头的 KV Cache。</p>
+<p>这带来一个实践约束：注意力头数必须能被 TP 整除。对 GQA/MQA 模型，KV 头数可能少于 Q 头数，当 TP 大于 KV 头数时，部分 rank 没有 KV 头可分，框架通常会把 KV 头复制到多个 rank，或者要求 TP 不超过 KV 头数。部署前先检查模型的 <code>num_attention_heads</code> 和 <code>num_key_value_heads</code>，比调参更重要。</p>
+<p>推理 TP 还会影响延迟。TP 越大，单卡 GEMM 越小，All-Reduce 的相对开销越高；在小 batch 的 decode 阶段，通信延迟可能盖过计算收益。常见做法是 prefill 用较大的 TP 提高吞吐，decode 用较小的 TP 或改用 EP/DP，这也是 DeepSeek 分离 prefill 与 decode 部署的动机之一。</p>
+</section>
+<section id="section-7"><h3>什么时候用 TP</h3>
+<p>适合 TP 的信号：</p>
+<ul>
+<li>单层权重或单层激活放不进单卡；</li>
+<li>模型 hidden size 较大（4096 以上），切分后每卡仍有足够大的 GEMM；</li>
+<li>有 NVLink/NVSwitch，TP 组能压在一个节点内。</li>
+</ul>
+<p>不适合 TP 的信号：</p>
+<ul>
+<li>模型能靠 DP 或 ZeRO 放下，TP 只会增加通信；</li>
+<li>TP 度超过单机 GPU 数，All-Reduce 被迫走 InfiniBand；</li>
+<li>注意力头数或词表大小不能被 TP 整除；</li>
+<li>batch 很小、序列很短，GEMM 已经很小，再切就只剩通信。</li>
+</ul>
+</section>
+<section id="section-8"><h3>参考资料</h3>
+<ul>
+<li>Shoeybi et al.，<a class="inline-link" href="https://arxiv.org/html/1909.08053v4" target="_blank" rel="noopener noreferrer">Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism</a></li>
+<li>Narayanan et al.，<a class="inline-link" href="https://arxiv.org/html/2104.04473v5" target="_blank" rel="noopener noreferrer">Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM</a></li>
+<li>NVIDIA Megatron Core：<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Parallelism Strategies Guide</a></li>
+<li>NVIDIA NeMo：<a class="inline-link" href="https://docs.nvidia.com/nemo-framework/user-guide/25.11/nemotoolkit/features/parallelisms.html" target="_blank" rel="noopener noreferrer">Parallelisms · Tensor Parallelism</a></li>
+<li>LLM Infra Atlas：<a class="inline-link" href="https://llm-infra-atlas.github.io/parallel/02_tp_sp/" target="_blank" rel="noopener noreferrer">Tensor Parallelism（TP）与 Sequence Parallelism（SP）</a></li>
+<li>CSDN：<a class="inline-link" href="https://blog.csdn.net/Antai_ZHU/article/details/144409187" target="_blank" rel="noopener noreferrer">图解大模型分布式训练：张量并行 Megatron-LM 方法</a></li>
+<li>CSDN：<a class="inline-link" href="https://happyprince.blog.csdn.net/article/details/163314037" target="_blank" rel="noopener noreferrer">Megatron 的并行与优化原理</a></li>
+<li>博客园：<a class="inline-link" href="https://www.cnblogs.com/rossiXYZ/p/15871062.html" target="_blank" rel="noopener noreferrer">模型并行分布式训练 Megatron（3）——模型并行实现</a></li>
+</ul>
+</section>
+            <div class="reader-actions"><a href="index.html">返回并行专题目录</a>
+<a href="02-data-parallel.html">上一篇：数据并行：从 DDP 到 ZeRO 与 FSDP</a>
+<a href="04-pipeline-parallel.html">下一篇：流水线并行：把层分段，让 micro-batch 流动</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="MoE 怎样把专家分散到多卡、token 怎样经 All-to-All 路由、DeepSeek-V3 的 EPLB 与 DeepEP 在解决什么问题。">
+    <meta name="theme-color" content="#0b2015">
+    <title>专家并行：MoE 的 All-to-All 与负载均衡 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/inference.css?v=20261014-reader-layout">
+    <link rel="stylesheet" href="../../assets/parallelism.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">并行计算</a><span>/</span>专家并行：MoE 的 All-to-All 与负载均衡</nav>
+        <div class="reader-heading"><h1>专家并行：MoE 的 All-to-All 与负载均衡</h1><p class="article-deck">第 5 篇 · 稀疏激活、All-to-All 与专家放置</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">MoE 的一次前向</a></li>
+<li><a href="#section-2">EP 怎样把专家分到多卡</a></li>
+<li><a href="#section-3">EP 与 DP 的耦合</a></li>
+<li><a href="#section-4">负载均衡：EP 最难的部分</a></li>
+<li><a href="#section-5">DeepEP：把 All-to-All 做成专用内核</a></li>
+<li><a href="#section-6">推理中的 EP：越宽越好吗</a></li>
+<li><a href="#section-7">EP 与其他维度的对比</a></li>
+<li><a href="#section-8">参考资料</a></li>
+              </ol></nav>
+            </details>
+            <details class="chapter-panel series-panel" open><summary>本系列</summary>
+              <nav aria-label="并行专题文章列表"><ol class="series-list">
+<li><a href="01-overview.html">为什么需要并行：五种切法与一张通信地图</a></li>
+<li><a href="02-data-parallel.html">数据并行：从 DDP 到 ZeRO 与 FSDP</a></li>
+<li><a href="03-tensor-parallel.html">张量并行：在同一层内切开矩阵</a></li>
+<li><a href="04-pipeline-parallel.html">流水线并行：把层分段，让 micro-batch 流动</a></li>
+<li class="is-current"><a href="05-expert-parallel.html" aria-current="page">专家并行：MoE 的 All-to-All 与负载均衡</a></li>
+<li><a href="06-context-parallel.html">序列与上下文并行：把长序列切开</a></li>
+<li><a href="07-combination.html">组合与选型：3D/4D 并行怎样落到集群</a></li>
+<li><a href="08-for-readers.html">写给博客读者：大模型并行到底在解决什么</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<p>稠密模型的并行，切的是同一个矩阵；MoE 模型的并行，切的是“哪些参数被激活”。DeepSeek-V3 有 671B 参数，但每个 token 只激活 37B；256 个路由专家分散在不同的 GPU 上，每个 token 由路由器选出 8 个专家，然后被送到持有这些专家的卡上计算。专家并行（EP）就是为这种稀疏激活设计的第五个维度：它不切层内的矩阵，也不切层，而是把专家本身分到不同 GPU 上。</p>
+<section id="section-1"><h3>MoE 的一次前向</h3>
+<p>一个 MoE 层包含一个路由器和若干专家。对每个 token，路由器计算它到各专家的分数，选出 top-k 个专家；每个被选中的专家对 token 做一次 FFN；最后按路由权重把各专家的输出加权求和。</p>
+<figure class="engine-code"><figcaption>代码片段 <span>text</span></figcaption><pre><code>token x
+  → Router: 计算 256 个专家的分数
+  → Top-8: 选中 8 个专家
+  → Dispatch: 把 x 发送到持有这 8 个专家的 GPU
+  → Expert FFN: 每个专家处理自己收到的 token
+  → Combine: 把 8 份输出送回原 GPU，按权重相加</code></pre></figure>
+<p>稠密模型每个 token 都经过同一组 FFN 权重；MoE 每个 token 只经过少数专家，所以总参数量可以很大，而单 token 的计算量保持较小。DeepSeek-V3 的配置是 256 个路由专家加 1 个共享专家，每个 token 激活 8 个路由专家，总参数 671B、激活 37B。<a class="inline-link" href="https://arxiv.org/html/2412.19437" target="_blank" rel="noopener noreferrer">DeepSeek-V3 Technical Report</a></p>
+</section>
+<section id="section-2"><h3>EP 怎样把专家分到多卡</h3>
+<p>设专家并行度为 <code>EP</code>，模型有 <code>E</code> 个路由专家，则每张卡持有 <code>E/EP</code> 个专家。以 DeepSeek-V3 的 256 个专家、<code>EP=64</code> 为例，每张卡持有 4 个专家；如果再加上冗余专家，每张卡持有的数量会相应增加。</p>
+<figure class="engine-figure"><a href="images/ep-alltoall.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/ep-alltoall.svg" alt="专家并行的一次 All-to-All：token 经路由器选出专家后，被分发到持有对应专家的 GPU，专家计算后再回收并加权求和。"></a><figcaption>专家并行的一次 All-to-All：token 经路由器选出专家后，被分发到持有对应专家的 GPU，专家计算后再回收并加权求和。 点击可打开完整图片。</figcaption></figure>
+<p>关键在于，token 不再固定留在某张卡上。它必须离开原来的 GPU，去到持有目标专家的 GPU；计算完再回来。这一次“去”和一次“回”，就是 MoE 训练中最昂贵的两笔 All-to-All：</p>
+<ul>
+<li><strong>Dispatch All-to-All</strong>：每张卡把本地 token 按目标专家分组，发送给对应的卡；</li>
+<li><strong>Combine All-to-All</strong>：每张卡把专家算完的结果发回 token 原来的卡。</li>
+</ul>
+<p>每次 All-to-All 的数据量与 <code>token 数 × top-k × hidden × 字节数</code> 成正比。<code>top-k=8</code> 意味着同一个 token 要被复制到 8 个目的地，通信量是稠密模型激活传输的数倍。这也是 EP 必须和计算重叠、必须用高带宽网络的原因。</p>
+</section>
+<section id="section-3"><h3>EP 与 DP 的耦合</h3>
+<p>在 Megatron 的并行布局里，EP 通常叠加在 DP 之上：Attention 部分按 DP 复制，MoE 部分按 EP 切分。也就是说，一个 DP 组内的多张卡，在 MoE 层里变成了一组 EP rank；Attention 仍然各自持有完整副本。</p>
+<p>这带来一个有用的性质：EP 不要求每张卡都保存全部专家，因此单卡显存可以显著下降。671B 的 FP16 权重约 1.3 TB，一张 H100 的 80 GB 放不下；但每张卡只放一部分专家，加上 Attention 的 DP 副本，就能把模型摊到几十张卡上。代价是 token 要在 EP 组内往返，All-to-All 成为新的瓶颈。</p>
+<p>DeepSeek-V3 的训练配置是 16 路 PP、64 路 EP（跨 8 个节点）、ZeRO-1 DP，在 2048 张 H800 上完成；它没有使用 TP。官方在后续的系统分析里解释过原因：H800 的节点内带宽和模型形状让 TP 不划算，而 EP 能把专家分散到更多节点，配合 DualPipe 把 All-to-All 藏进计算里。<a class="inline-link" href="https://arxiv.org/html/2412.19437" target="_blank" rel="noopener noreferrer">DeepSeek-V3 Technical Report</a></p>
+</section>
+<section id="section-4"><h3>负载均衡：EP 最难的部分</h3>
+<p>EP 的通信量不是固定的，它取决于路由结果。如果某个专家特别热门，持有它的 GPU 就会收到大量 token，成为 straggler；其它 GPU 则在等它。更糟的是，路由是动态的，负载会随训练数据变化。</p>
+<p>常见手段有三类：</p>
+<p><strong>辅助负载均衡损失。</strong> 在训练损失里加一项，惩罚专家负载的方差，鼓励路由器把 token 分得更均匀。这是 GShard、Switch Transformer 以来的标准做法，但辅助损失可能损害模型质量。</p>
+<p><strong>无辅助损失的偏置调整。</strong> DeepSeek-V3 给每个专家维护一个偏置项，根据负载动态调整路由分数，而不在损失函数里加惩罚。这样既平衡了负载，又避免了辅助损失对语言建模目标的干扰。</p>
+<p><strong>冗余专家与重排。</strong> 对高负载专家复制多份，再把副本打包到不同 GPU 上。DeepSeek 开源的 EPLB（Expert Parallelism Load Balancer）做的就是这件事：根据估计的专家负载，先按节点做分层打包，保证节点间负载均衡，再在节点内复制和放置专家；得益于 group-limited routing，它还会尽量把同一组专家放在同一节点，减少跨节点流量。<a class="inline-link" href="https://github.com/deepseek-ai/EPLB" target="_blank" rel="noopener noreferrer">EPLB</a></p>
+<p>DeepSeek-V3 还使用了 node-limited routing：256 个路由专家分成 8 组、每组 32 个，部署时每组放在一个节点上，算法保证每个 token 最多被路由到 4 个节点。这样跨节点的 All-to-All 流量就有了上界，不会因为路由到太多节点而爆炸。<a class="inline-link" href="https://arxiv.org/pdf/2505.09343" target="_blank" rel="noopener noreferrer">Insights into DeepSeek-V3</a></p>
+</section>
+<section id="section-5"><h3>DeepEP：把 All-to-All 做成专用内核</h3>
+<p>DeepSeek 开源的 DeepEP 是面向 MoE 的通信库，目标是把 EP 的 All-to-All 做得更高效：</p>
+<ul>
+<li>同时支持 NVLink 和 RDMA，节点内走 NVLink，节点间走 InfiniBand；</li>
+<li>为 prefill 提供高吞吐内核，为 decode 提供低延迟内核；</li>
+<li>原生支持 FP8 调度，降低通信带宽需求；</li>
+<li>通过 SM 分配和通信/计算重叠，减少 All-to-All 对计算资源的占用。</li>
+</ul>
+<p>这些优化对应的正是 EP 的两个阶段：prefill 阶段 token 多、吞吐优先；decode 阶段每步 token 少、延迟优先。两者的最优内核和并行度并不相同，所以 DeepSeek 在生产部署里把 prefill 和 decode 分开配置。</p>
+</section>
+<section id="section-6"><h3>推理中的 EP：越宽越好吗</h3>
+<p>DeepSeek 公开的推理系统给出了一个很有参考价值的配置：prefill 阶段使用路由专家 EP32，MLA 和共享专家 DP32，一个部署单元跨 4 个节点，每张卡负责 9 个路由专家加 1 个共享专家；decode 阶段使用 EP144，一个部署单元跨 18 个节点，每张卡只负责 2 个路由专家加 1 个共享专家。两者都是 TP1，即不做张量并行。<a class="inline-link" href="https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md" target="_blank" rel="noopener noreferrer">DeepSeek-V3/R1 Inference System Overview</a></p>
+<p>为什么 decode 要用更大的 EP？因为 decode 每步只有少量 token，单卡上的专家如果太多，每个专家分到的 batch 太小，GEMM 效率低；把专家摊到更多卡上，每张卡只留少量专家，可以让每个专家获得更合适的 batch，同时降低单卡显存。代价是 All-to-All 的跨节点跳数增加，必须靠 DeepEP 的低延迟内核和双 micro-batch 重叠来掩盖。</p>
+<p>这也说明 EP 不是“越大越好”。EP 度受这些因素约束：</p>
+<ul>
+<li>专家总数必须能被 EP 整除，冗余专家的放置还要额外处理；</li>
+<li>EP 组越大，All-to-All 的跨节点流量越大，网络成为瓶颈；</li>
+<li>每张卡上的专家太少，单个专家的 GEMM 变小，计算效率下降；</li>
+<li>路由负载不均时，EP 度越大，straggler 的影响越明显。</li>
+</ul>
+</section>
+<section id="section-7"><h3>EP 与其他维度的对比</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>切分对象</th>
+<th>适用模型</th>
+<th>主要通信</th>
+<th>显存收益</th>
+<th>主要风险</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DP</td>
+<td>batch</td>
+<td>稠密与 MoE</td>
+<td>梯度 All-Reduce</td>
+<td>无（副本复制）</td>
+<td>模型状态冗余</td>
+</tr>
+<tr>
+<td>TP</td>
+<td>层内矩阵</td>
+<td>稠密与 MoE 的 Attention</td>
+<td>All-Reduce</td>
+<td>权重与激活按 TP 下降</td>
+<td>通信频繁，受 NVLink 域限制</td>
+</tr>
+<tr>
+<td>PP</td>
+<td>层</td>
+<td>稠密与 MoE</td>
+<td>P2P</td>
+<td>按 stage 下降</td>
+<td>气泡与负载不均</td>
+</tr>
+<tr>
+<td>EP</td>
+<td>专家</td>
+<td>MoE</td>
+<td>All-to-All</td>
+<td>专家权重按 EP 下降</td>
+<td>路由不均、All-to-All 延迟</td>
+</tr>
+</tbody></table></div>
+<p>EP 的特殊之处在于，它只作用于 MoE 层。Attention、LayerNorm、Embedding 仍然需要 DP、TP 或 PP 来处理。所以真实配置往往是“Attention 用 DP/TP，MoE 用 EP”，再叠加 PP 管深度。DeepSeek-V3 的 <code>PP16 + EP64 + DP(ZeRO-1)</code> 就是这种组合。</p>
+</section>
+<section id="section-8"><h3>参考资料</h3>
+<ul>
+<li>DeepSeek-AI，<a class="inline-link" href="https://arxiv.org/html/2412.19437" target="_blank" rel="noopener noreferrer">DeepSeek-V3 Technical Report</a></li>
+<li>DeepSeek-AI，<a class="inline-link" href="https://arxiv.org/pdf/2505.09343" target="_blank" rel="noopener noreferrer">Insights into DeepSeek-V3: Scaling Challenges and Reflections on Hardware for AI Architectures</a></li>
+<li>DeepSeek-AI，<a class="inline-link" href="https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md" target="_blank" rel="noopener noreferrer">DeepSeek-V3/R1 Inference System Overview</a></li>
+<li>DeepSeek-AI，<a class="inline-link" href="https://github.com/deepseek-ai/EPLB" target="_blank" rel="noopener noreferrer">EPLB: Expert Parallelism Load Balancer</a></li>
+<li>NVIDIA Megatron Core：<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Parallelism Strategies Guide · Expert Parallelism</a></li>
+<li>博客：<a class="inline-link" href="https://forceinjection.github.io/09_inference_system/parallelism/expert_parallelism_deep_dive.html" target="_blank" rel="noopener noreferrer">专家并行（EP）深度解析——MoE 时代的第五种并行维度</a></li>
+<li>火山引擎开发者社区：<a class="inline-link" href="https://developer.volcengine.com/articles/7542491735755063342" target="_blank" rel="noopener noreferrer">DeepSeek-V3 技术报告（中文）</a></li>
+</ul>
+</section>
+            <div class="reader-actions"><a href="index.html">返回并行专题目录</a>
+<a href="04-pipeline-parallel.html">上一篇：流水线并行：把层分段，让 micro-batch 流动</a>
+<a href="06-context-parallel.html">下一篇：序列与上下文并行：把长序列切开</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

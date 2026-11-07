@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">Ring Attention 与 Ulysses</title>
+  <desc id="desc">Ring Attention 让每张卡持有本地 Q 和 KV，KV 块沿环传递；Ulysses 用两次 All-to-All 在序列维和头维之间重排。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3b7651" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#b8893c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .panel-title { font-size: 21px; font-weight: 720; }
+      .box-title { font-size: 17px; font-weight: 700; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .label { font-size: 13px; font-weight: 600; fill: #39714d; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .arrow { fill: none; stroke: #3b7651; stroke-width: 2.2; marker-end: url(#arrow); }
+      .arrow-amber { fill: none; stroke: #b8893c; stroke-width: 1.8; stroke-dasharray: 6 4; marker-end: url(#arrow-amber); }
+      .ring { fill: none; stroke: #5f9656; stroke-width: 2.6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="624" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="54" class="title">Ring Attention 与 Ulysses：两种切序列的方式</text>
+  <text x="43" y="82" class="subtitle">Ring 传 KV 块，通信与计算重叠；Ulysses 用 All-to-All 换布局，通信更集中。</text>
+
+  <!-- Left panel -->
+  <rect x="40" y="112" width="536" height="486" rx="18" fill="#f6faf1" stroke="#c6d9bd" stroke-width="1.5"/>
+  <text x="62" y="146" class="panel-title">Ring Attention：KV 沿环传递</text>
+  <text x="62" y="170" class="body">每张卡持有本地 Q、K、V；每轮收到一块 KV，就更新一次 online softmax。</text>
+
+  <g>
+    <rect x="82" y="206" width="152" height="74" rx="10" fill="#eaf2df" stroke="#abcca1"/>
+    <text x="158" y="234" text-anchor="middle" class="box-title">GPU 0</text>
+    <text x="158" y="258" text-anchor="middle" class="tiny">Q0 K0 V0</text>
+
+    <rect x="330" y="206" width="152" height="74" rx="10" fill="#f7efda" stroke="#dfd0a8"/>
+    <text x="406" y="234" text-anchor="middle" class="box-title">GPU 1</text>
+    <text x="406" y="258" text-anchor="middle" class="tiny">Q1 K1 V1</text>
+
+    <rect x="330" y="398" width="152" height="74" rx="10" fill="#eaf2df" stroke="#abcca1"/>
+    <text x="406" y="426" text-anchor="middle" class="box-title">GPU 2</text>
+    <text x="406" y="450" text-anchor="middle" class="tiny">Q2 K2 V2</text>
+
+    <rect x="82" y="398" width="152" height="74" rx="10" fill="#f7efda" stroke="#dfd0a8"/>
+    <text x="158" y="426" text-anchor="middle" class="box-title">GPU 3</text>
+    <text x="158" y="450" text-anchor="middle" class="tiny">Q3 K3 V3</text>
+  </g>
+
+  <path class="ring" d="M238 226 C280 226, 300 226, 322 230"/>
+  <path class="ring" d="M406 284 C406 320, 406 340, 406 390"/>
+  <path class="ring" d="M322 450 C280 450, 260 450, 240 446"/>
+  <path class="ring" d="M158 390 C158 350, 158 330, 158 288"/>
+  <text x="272" y="212" class="label">K/V</text>
+  <text x="414" y="344" class="label">K/V</text>
+  <text x="272" y="474" class="label">K/V</text>
+  <text x="120" y="344" class="label">K/V</text>
+
+  <text x="62" y="514" class="body">每张卡把本地 KV 传 CP−1 次，数据量与 S/CP × hidden 成正比；</text>
+  <text x="62" y="536" class="body">P2P 传输可以拆成小块，与当前块的注意力计算重叠。</text>
+  <text x="62" y="564" class="tiny">Causal mask 下用 zigzag 切分平衡各 rank 的计算量。</text>
+
+  <!-- Right panel -->
+  <rect x="604" y="112" width="556" height="486" rx="18" fill="#f9f3e4" stroke="#e2d7bb" stroke-width="1.5"/>
+  <text x="626" y="146" class="panel-title">Ulysses：用 All-to-All 换布局</text>
+  <text x="626" y="170" class="body">先把“序列切分、头完整”换成“序列完整、头切分”，算完再换回来。</text>
+
+  <!-- top row -->
+  <g>
+    <rect x="640" y="196" width="108" height="58" rx="9" fill="#fffdf7" stroke="#c9b98e"/>
+    <text x="694" y="220" text-anchor="middle" class="body">[S/4, H]</text>
+    <text x="694" y="240" text-anchor="middle" class="tiny">GPU 0</text>
+
+    <rect x="762" y="196" width="108" height="58" rx="9" fill="#fffdf7" stroke="#c9b98e"/>
+    <text x="816" y="220" text-anchor="middle" class="body">[S/4, H]</text>
+    <text x="816" y="240" text-anchor="middle" class="tiny">GPU 1</text>
+
+    <rect x="884" y="196" width="108" height="58" rx="9" fill="#fffdf7" stroke="#c9b98e"/>
+    <text x="938" y="220" text-anchor="middle" class="body">[S/4, H]</text>
+    <text x="938" y="240" text-anchor="middle" class="tiny">GPU 2</text>
+
+    <rect x="1006" y="196" width="108" height="58" rx="9" fill="#fffdf7" stroke="#c9b98e"/>
+    <text x="1060" y="220" text-anchor="middle" class="body">[S/4, H]</text>
+    <text x="1060" y="240" text-anchor="middle" class="tiny">GPU 3</text>
+  </g>
+
+  <!-- All-to-All -->
+  <rect x="700" y="284" width="356" height="46" rx="10" fill="#eef4e6" stroke="#7da36f" stroke-width="2"/>
+  <text x="878" y="313" text-anchor="middle" class="box-title">All-to-All #1</text>
+
+  <path class="arrow" d="M694 256 V278"/>
+  <path class="arrow" d="M816 256 V278"/>
+  <path class="arrow" d="M938 256 V278"/>
+  <path class="arrow" d="M1060 256 V278"/>
+
+  <!-- bottom row -->
+  <g>
+    <rect x="640" y="356" width="108" height="58" rx="9" fill="#f4f8ee" stroke="#abcca1"/>
+    <text x="694" y="380" text-anchor="middle" class="body">[S, H/4]</text>
+    <text x="694" y="400" text-anchor="middle" class="tiny">头 0</text>
+
+    <rect x="762" y="356" width="108" height="58" rx="9" fill="#f4f8ee" stroke="#abcca1"/>
+    <text x="816" y="380" text-anchor="middle" class="body">[S, H/4]</text>
+    <text x="816" y="400" text-anchor="middle" class="tiny">头 1</text>
+
+    <rect x="884" y="356" width="108" height="58" rx="9" fill="#f4f8ee" stroke="#abcca1"/>
+    <text x="938" y="380" text-anchor="middle" class="body">[S, H/4]</text>
+    <text x="938" y="400" text-anchor="middle" class="tiny">头 2</text>
+
+    <rect x="1006" y="356" width="108" height="58" rx="9" fill="#f4f8ee" stroke="#abcca1"/>
+    <text x="1060" y="380" text-anchor="middle" class="body">[S, H/4]</text>
+    <text x="1060" y="400" text-anchor="middle" class="tiny">头 3</text>
+  </g>
+
+  <path class="arrow" d="M694 332 V350"/>
+  <path class="arrow" d="M816 332 V350"/>
+  <path class="arrow" d="M938 332 V350"/>
+  <path class="arrow" d="M1060 332 V350"/>
+
+  <text x="626" y="444" class="body">每张卡现在能对完整序列计算自己那部分头，注意力内部不需要跨卡通信。</text>
+
+  <path class="arrow-amber" d="M1060 420 C1120 450, 1120 500, 1060 520 C1000 540, 900 540, 850 520"/>
+  <text x="900" y="558" text-anchor="middle" class="label">All-to-All #2：换回 [S/4, H]</text>
+
+  <text x="626" y="586" class="tiny">Ulysses 要求头数能被 CP 整除；All-to-All 是全局同步，重叠难度高于 Ring 的 P2P。</text>
+</svg>

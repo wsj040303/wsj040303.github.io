@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">DDP 与 ZeRO 三档的显存分片</title>
+  <desc id="desc">DDP 在每张卡复制参数、梯度和优化器状态；ZeRO-1 只分片优化器状态，ZeRO-2 再分片梯度，ZeRO-3 把参数也分片。</desc>
+  <defs>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .row-title { font-size: 20px; font-weight: 720; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .gpu-label { font-size: 12px; font-weight: 600; fill: #39714d; }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="624" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="56" class="title">DDP 与 ZeRO 三档：每张卡到底存什么</text>
+  <text x="43" y="84" class="subtitle">以 4 张卡为例。P = 参数，G = 梯度，O = 优化器状态；深色表示本卡实际保存的分片。</text>
+
+  <!-- Legend -->
+  <g transform="translate(780, 58)">
+    <rect x="0" y="0" width="16" height="12" rx="3" fill="#7fae72"/>
+    <text x="22" y="11" class="tiny">参数 P</text>
+    <rect x="86" y="0" width="16" height="12" rx="3" fill="#c9a25e"/>
+    <text x="108" y="11" class="tiny">梯度 G</text>
+    <rect x="172" y="0" width="16" height="12" rx="3" fill="#7d9fc4"/>
+    <text x="194" y="11" class="tiny">优化器 O</text>
+  </g>
+
+  <!-- Row helper: label + 4 GPU boxes -->
+  <!-- DDP -->
+  <text x="40" y="150" class="row-title">DDP / ZeRO-0</text>
+  <text x="40" y="174" class="body">每卡完整复制</text>
+  <text x="40" y="194" class="tiny">7B 约 112 GB/卡</text>
+  <g>
+    <rect x="250" y="128" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="262" y="140" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="262" y="160" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="262" y="180" width="176" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="350" y="219" text-anchor="middle" class="gpu-label">GPU 0</text>
+
+    <rect x="480" y="128" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="492" y="140" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="492" y="160" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="492" y="180" width="176" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="580" y="219" text-anchor="middle" class="gpu-label">GPU 1</text>
+
+    <rect x="710" y="128" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="722" y="140" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="722" y="160" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="722" y="180" width="176" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="810" y="219" text-anchor="middle" class="gpu-label">GPU 2</text>
+
+    <rect x="940" y="128" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="952" y="140" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="952" y="160" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="952" y="180" width="176" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="1040" y="219" text-anchor="middle" class="gpu-label">GPU 3</text>
+  </g>
+
+  <!-- ZeRO-1 -->
+  <text x="40" y="288" class="row-title">ZeRO-1</text>
+  <text x="40" y="312" class="body">只分片优化器状态</text>
+  <text x="40" y="332" class="tiny">7B 约 38.5 GB/卡</text>
+  <g>
+    <rect x="250" y="266" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="262" y="278" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="262" y="298" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="262" y="318" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="306" y="318" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="350" y="357" text-anchor="middle" class="gpu-label">O 分片 0</text>
+
+    <rect x="480" y="266" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="492" y="278" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="492" y="298" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="492" y="318" width="44" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="318" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="580" y="318" width="58" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="580" y="357" text-anchor="middle" class="gpu-label">O 分片 1</text>
+
+    <rect x="710" y="266" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="722" y="278" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="722" y="298" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="722" y="318" width="88" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="318" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="854" y="318" width="34" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="810" y="357" text-anchor="middle" class="gpu-label">O 分片 2</text>
+
+    <rect x="940" y="266" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="952" y="278" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="952" y="298" width="176" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="952" y="318" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="318" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="1040" y="357" text-anchor="middle" class="gpu-label">O 分片 3</text>
+  </g>
+
+  <!-- ZeRO-2 -->
+  <text x="40" y="426" class="row-title">ZeRO-2</text>
+  <text x="40" y="450" class="body">再分片梯度</text>
+  <text x="40" y="470" class="tiny">7B 约 26.3 GB/卡</text>
+  <g>
+    <rect x="250" y="404" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="262" y="416" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="262" y="436" width="44" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="306" y="436" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="262" y="456" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="306" y="456" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="350" y="495" text-anchor="middle" class="gpu-label">G/O 分片 0</text>
+
+    <rect x="480" y="404" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="492" y="416" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="492" y="436" width="44" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="436" width="44" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="580" y="436" width="58" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="492" y="456" width="44" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="456" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="580" y="456" width="58" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="580" y="495" text-anchor="middle" class="gpu-label">G/O 分片 1</text>
+
+    <rect x="710" y="404" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="722" y="416" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="722" y="436" width="88" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="436" width="44" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="854" y="436" width="34" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="722" y="456" width="88" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="456" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <rect x="854" y="456" width="34" height="13" rx="3" fill="#e3e9dc"/>
+    <text x="810" y="495" text-anchor="middle" class="gpu-label">G/O 分片 2</text>
+
+    <rect x="940" y="404" width="200" height="76" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="952" y="416" width="176" height="13" rx="3" fill="#7fae72"/>
+    <rect x="952" y="436" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="436" width="44" height="13" rx="3" fill="#c9a25e"/>
+    <rect x="952" y="456" width="132" height="13" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="456" width="44" height="13" rx="3" fill="#7d9fc4"/>
+    <text x="1040" y="495" text-anchor="middle" class="gpu-label">G/O 分片 3</text>
+  </g>
+
+  <!-- ZeRO-3 -->
+  <text x="40" y="564" class="row-title">ZeRO-3 / FSDP</text>
+  <text x="40" y="588" class="body">参数也分片</text>
+  <text x="40" y="608" class="tiny">7B 约 14 GB/卡</text>
+  <g>
+    <rect x="250" y="538" width="200" height="74" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="262" y="548" width="44" height="11" rx="3" fill="#7fae72"/>
+    <rect x="306" y="548" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="262" y="568" width="44" height="11" rx="3" fill="#c9a25e"/>
+    <rect x="306" y="568" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="262" y="588" width="44" height="11" rx="3" fill="#7d9fc4"/>
+    <rect x="306" y="588" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <text x="350" y="628" text-anchor="middle" class="gpu-label">P/G/O 分片 0</text>
+
+    <rect x="480" y="538" width="200" height="74" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="492" y="548" width="44" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="548" width="44" height="11" rx="3" fill="#7fae72"/>
+    <rect x="580" y="548" width="58" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="492" y="568" width="44" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="568" width="44" height="11" rx="3" fill="#c9a25e"/>
+    <rect x="580" y="568" width="58" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="492" y="588" width="44" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="536" y="588" width="44" height="11" rx="3" fill="#7d9fc4"/>
+    <rect x="580" y="588" width="58" height="11" rx="3" fill="#e3e9dc"/>
+    <text x="580" y="628" text-anchor="middle" class="gpu-label">P/G/O 分片 1</text>
+
+    <rect x="710" y="538" width="200" height="74" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="722" y="548" width="88" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="548" width="44" height="11" rx="3" fill="#7fae72"/>
+    <rect x="854" y="548" width="34" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="722" y="568" width="88" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="568" width="44" height="11" rx="3" fill="#c9a25e"/>
+    <rect x="854" y="568" width="34" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="722" y="588" width="88" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="810" y="588" width="44" height="11" rx="3" fill="#7d9fc4"/>
+    <rect x="854" y="588" width="34" height="11" rx="3" fill="#e3e9dc"/>
+    <text x="810" y="628" text-anchor="middle" class="gpu-label">P/G/O 分片 2</text>
+
+    <rect x="940" y="538" width="200" height="74" rx="11" fill="#f6faf1" stroke="#b7cfad"/>
+    <rect x="952" y="548" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="548" width="44" height="11" rx="3" fill="#7fae72"/>
+    <rect x="952" y="568" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="568" width="44" height="11" rx="3" fill="#c9a25e"/>
+    <rect x="952" y="588" width="132" height="11" rx="3" fill="#e3e9dc"/>
+    <rect x="1084" y="588" width="44" height="11" rx="3" fill="#7d9fc4"/>
+    <text x="1040" y="628" text-anchor="middle" class="gpu-label">P/G/O 分片 3</text>
+  </g>
+</svg>

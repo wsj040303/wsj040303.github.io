@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">专家并行的 All-to-All</title>
+  <desc id="desc">token 经路由器选出 top-k 专家后，通过 Dispatch All-to-All 发送到持有这些专家的 GPU；专家计算后，再通过 Combine All-to-All 返回并按权重相加。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3b7651" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#b8893c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .box-title { font-size: 18px; font-weight: 700; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .label { font-size: 13px; font-weight: 600; fill: #39714d; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .arrow { fill: none; stroke: #3b7651; stroke-width: 2.2; marker-end: url(#arrow); }
+      .arrow-back { fill: none; stroke: #b8893c; stroke-width: 1.8; stroke-dasharray: 6 4; marker-end: url(#arrow-amber); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="624" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="54" class="title">专家并行：一次 Dispatch、一次 Combine</text>
+  <text x="43" y="82" class="subtitle">token 被路由到持有目标专家的 GPU，计算后再回到原卡加权求和。两次 All-to-All 是 EP 最贵的通信。</text>
+
+  <!-- left: local tokens -->
+  <text x="44" y="126" class="label">各 DP rank 的本地 token</text>
+  <g>
+    <rect x="44" y="142" width="168" height="38" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <circle cx="64" cy="161" r="6" fill="#5f9656"/><circle cx="82" cy="161" r="6" fill="#7fae72"/><circle cx="100" cy="161" r="6" fill="#a4c996"/>
+    <text x="152" y="166" text-anchor="middle" class="tiny">GPU 0</text>
+
+    <rect x="44" y="190" width="168" height="38" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <circle cx="64" cy="209" r="6" fill="#5f9656"/><circle cx="82" cy="209" r="6" fill="#7fae72"/><circle cx="100" cy="209" r="6" fill="#a4c996"/>
+    <text x="152" y="214" text-anchor="middle" class="tiny">GPU 1</text>
+
+    <rect x="44" y="238" width="168" height="38" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <circle cx="64" cy="257" r="6" fill="#5f9656"/><circle cx="82" cy="257" r="6" fill="#7fae72"/><circle cx="100" cy="257" r="6" fill="#a4c996"/>
+    <text x="152" y="262" text-anchor="middle" class="tiny">GPU 2</text>
+
+    <rect x="44" y="286" width="168" height="38" rx="9" fill="#eaf2df" stroke="#abcca1"/>
+    <circle cx="64" cy="305" r="6" fill="#5f9656"/><circle cx="82" cy="305" r="6" fill="#7fae72"/><circle cx="100" cy="305" r="6" fill="#a4c996"/>
+    <text x="152" y="310" text-anchor="middle" class="tiny">GPU 3</text>
+  </g>
+
+  <!-- router -->
+  <path d="M300 186 L360 212 L300 238 L240 212 Z" fill="#fffdf7" stroke="#c9b98e" stroke-width="2.2"/>
+  <text x="300" y="209" text-anchor="middle" class="box-title">Router</text>
+  <text x="300" y="228" text-anchor="middle" class="tiny">top-k</text>
+
+  <path class="arrow" d="M212 161 C230 161, 236 190, 250 200"/>
+  <path class="arrow" d="M212 209 H234"/>
+  <path class="arrow" d="M212 257 C230 257, 236 232, 250 224"/>
+  <path class="arrow" d="M212 305 C236 305, 246 270, 262 240"/>
+
+  <!-- right: experts -->
+  <text x="560" y="126" class="label">持有专家的 EP rank</text>
+  <g>
+    <rect x="560" y="140" width="290" height="44" rx="9" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="580" y="168" class="body">E0</text><text x="630" y="168" class="body">E1</text><text x="680" y="168" class="body">E2</text><text x="730" y="168" class="body">E3</text>
+    <text x="836" y="168" text-anchor="end" class="tiny">GPU 0</text>
+
+    <rect x="560" y="192" width="290" height="44" rx="9" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="580" y="220" class="body">E4</text><text x="630" y="220" class="body">E5</text><text x="680" y="220" class="body">E6</text><text x="730" y="220" class="body">E7</text>
+    <text x="836" y="220" text-anchor="end" class="tiny">GPU 1</text>
+
+    <rect x="560" y="244" width="290" height="44" rx="9" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="580" y="272" class="body">E8</text><text x="630" y="272" class="body">E9</text><text x="680" y="272" class="body">E10</text><text x="730" y="272" class="body">E11</text>
+    <text x="836" y="272" text-anchor="end" class="tiny">GPU 2</text>
+
+    <rect x="560" y="296" width="290" height="44" rx="9" fill="#fdf8ea" stroke="#d8c79a"/>
+    <text x="580" y="324" class="body">E12</text><text x="630" y="324" class="body">E13</text><text x="680" y="324" class="body">E14</text><text x="730" y="324" class="body">E15</text>
+    <text x="836" y="324" text-anchor="end" class="tiny">GPU 3</text>
+  </g>
+
+  <!-- dispatch arrows -->
+  <path class="arrow" d="M360 196 C420 178, 490 166, 552 162"/>
+  <path class="arrow" d="M360 206 C430 206, 490 210, 552 212"/>
+  <path class="arrow" d="M360 220 C430 236, 490 258, 552 264"/>
+  <path class="arrow" d="M360 232 C430 270, 490 310, 552 316"/>
+  <text x="450" y="146" class="label">Dispatch All-to-All</text>
+
+  <!-- combine arrows back -->
+  <path class="arrow-back" d="M852 186 C906 186, 916 230, 852 246"/>
+  <path class="arrow-back" d="M852 240 C906 240, 916 280, 852 300"/>
+  <text x="930" y="256" class="label">Combine</text>
+  <text x="930" y="276" class="tiny">按路由权重求和</text>
+
+  <!-- bottom pipeline -->
+  <rect x="44" y="392" width="1108" height="196" rx="16" fill="#f6faf1" stroke="#c6d9bd" stroke-width="1.5"/>
+  <text x="66" y="424" class="box-title">每张卡上的执行顺序</text>
+
+  <g>
+    <rect x="70" y="452" width="210" height="62" rx="10" fill="#eaf2df" stroke="#abcca1"/>
+    <text x="175" y="478" text-anchor="middle" class="body">本地 token</text>
+    <text x="175" y="498" text-anchor="middle" class="tiny">记录路由目标</text>
+
+    <path class="arrow" d="M282 483 H328"/>
+
+    <rect x="334" y="452" width="210" height="62" rx="10" fill="#f7efda" stroke="#dfd0a8"/>
+    <text x="439" y="478" text-anchor="middle" class="body">Dispatch All-to-All</text>
+    <text x="439" y="498" text-anchor="middle" class="tiny">按目标专家分组发送</text>
+
+    <path class="arrow" d="M546 483 H592"/>
+
+    <rect x="598" y="452" width="210" height="62" rx="10" fill="#eef4e6" stroke="#c2d6b8"/>
+    <text x="703" y="478" text-anchor="middle" class="body">Expert FFN</text>
+    <text x="703" y="498" text-anchor="middle" class="tiny">每个专家处理收到的一批 token</text>
+
+    <path class="arrow" d="M810 483 H856"/>
+
+    <rect x="862" y="452" width="210" height="62" rx="10" fill="#f9f3e4" stroke="#e2d7bb"/>
+    <text x="967" y="478" text-anchor="middle" class="body">Combine All-to-All</text>
+    <text x="967" y="498" text-anchor="middle" class="tiny">送回原卡并加权相加</text>
+  </g>
+
+  <text x="66" y="552" class="body">通信量：每次 All-to-All 约为 tokens × top-k × hidden × 字节数；top-k 越大，复制到目的地的副本越多。</text>
+  <text x="66" y="574" class="tiny">DeepSeek-V3：671B 总参数、37B 激活，256 路由专家 + 1 共享专家，top-8；训练用 64 路 EP，推理 decode 可扩到 EP144。</text>
+</svg>

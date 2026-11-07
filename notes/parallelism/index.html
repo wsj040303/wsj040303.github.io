@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="大模型并行专题：数据并行、张量并行、流水线并行、专家并行与上下文并行，以及 3D/4D 并行组合与选型。">
+    <meta name="theme-color" content="#0b2015">
+    <title>并行计算 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/inference.css">
+    <link rel="stylesheet" href="../../assets/parallelism.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="catalog-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span>并行计算</nav>
+        <div class="page-heading">
+          <h1>并行计算</h1>
+        </div>
+        <section class="catalog-box" aria-label="并行计算专题目录">
+          <div class="topic-list parallel-topics">
+            <a class="topic-card" href="01-overview.html">
+              <h2>并行总览</h2>
+              <p>为什么需要并行、五种切法分别切什么，以及 All-Reduce、All-Gather、All-to-All 和 P2P 的通信地图。</p>
+            </a>
+            <a class="topic-card" href="02-data-parallel.html">
+              <h2>数据并行 DP</h2>
+              <p>复制模型、切分 batch；从 DDP 的梯度 All-Reduce 到 ZeRO-1/2/3 与 FSDP 的状态分片。</p>
+            </a>
+            <a class="topic-card" href="03-tensor-parallel.html">
+              <h2>张量并行 TP</h2>
+              <p>Megatron 的列并行与行并行、Attention 按头切分、每层四次 All-Reduce 与 NVLink 域约束。</p>
+            </a>
+            <a class="topic-card" href="04-pipeline-parallel.html">
+              <h2>流水线并行 PP</h2>
+              <p>GPipe、1F1B、交错式调度的时序，气泡公式，以及激活值显存从 O(m) 到 O(p) 的取舍。</p>
+            </a>
+            <a class="topic-card" href="05-expert-parallel.html">
+              <h2>专家并行 EP</h2>
+              <p>MoE 的稀疏激活、Dispatch/Combine 两次 All-to-All、EPLB 负载均衡与 DeepEP 低延迟内核。</p>
+            </a>
+            <a class="topic-card" href="06-context-parallel.html">
+              <h2>序列与上下文并行</h2>
+              <p>Megatron 序列并行、Ring Attention 与 Ulysses：长序列下激活显存和通信量的两种解法。</p>
+            </a>
+            <a class="topic-card" href="07-combination.html">
+              <h2>组合与选型</h2>
+              <p>把 DP、TP、PP、EP、CP 组合成 world size，对照 GPT-3、MT-NLG 与 DeepSeek-V3 的真实配置。</p>
+            </a>
+            <a class="topic-card" href="08-for-readers.html">
+              <h2>写给博客读者</h2>
+              <p>不用公式，用餐厅、医院和长文章的类比，讲清五种并行各自解决什么问题，以及新闻里的并行配置怎么读。</p>
+            </a>
+          </div>
+          <p class="parallel-catalog-note">这一组文章不绑定某个框架。每篇先讲清“切的是什么、通信多少、显存省在哪”，再落到 Megatron、DeepSpeed、PyTorch FSDP 和 DeepSeek 的实现与公开配置；文末列出 NVIDIA 官方文档、论文和中文博客，便于回查。</p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

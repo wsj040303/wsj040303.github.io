@@ -22,6 +22,8 @@
     "check:deepseek-r1": "node scripts/render-deepseek-r1.mjs --check",
     "build:inference": "node scripts/render-inference.mjs",
     "check:inference": "node scripts/render-inference.mjs --check",
+    "build:parallelism": "node scripts/render-parallelism.mjs",
+    "check:parallelism": "node scripts/render-parallelism.mjs --check",
     "build:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs",
     "check:chat-llm-calibration": "node scripts/render-chat-llm-calibration.mjs --check",
     "build:pikv": "node scripts/render-pikv.mjs",

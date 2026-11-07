@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">张量并行的 MLP</title>
+  <desc id="desc">输入 X 复制到两张卡，第一层按列切分权重 A，GeLU 各卡独立计算，第二层按行切分权重 B，最后用一次 All-Reduce 把部分和相加得到 Z。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#3b7651" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .box-title { font-size: 19px; font-weight: 700; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .label { font-size: 13px; font-weight: 600; fill: #39714d; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .lane { font-size: 14px; font-weight: 700; fill: #7b5b22; }
+      .arrow { fill: none; stroke: #3b7651; stroke-width: 2.4; marker-end: url(#arrow); }
+      .arrow-soft { fill: none; stroke: #83ad7a; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="604" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="54" class="title">张量并行的 MLP：列并行接行并行</text>
+  <text x="43" y="82" class="subtitle">Z = GeLU(XA) · B。第一层按列切 A，第二层按行切 B，整个 MLP 前向只需一次 All-Reduce。</text>
+
+  <!-- lanes -->
+  <rect x="150" y="118" width="660" height="168" rx="14" fill="#f6faf1" stroke="#c6d9bd" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <rect x="150" y="312" width="660" height="168" rx="14" fill="#fbf6ea" stroke="#dfd0a8" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="170" y="145" class="lane">GPU 0</text>
+  <text x="170" y="339" class="lane">GPU 1</text>
+
+  <!-- X -->
+  <rect x="40" y="268" width="86" height="66" rx="10" fill="#eaf2df" stroke="#abcca1" stroke-width="2"/>
+  <text x="83" y="296" text-anchor="middle" class="box-title">X</text>
+  <text x="83" y="318" text-anchor="middle" class="tiny">[b, s, h]</text>
+
+  <!-- A -->
+  <rect x="182" y="160" width="104" height="76" rx="10" fill="#ffffff" stroke="#c9b98e" stroke-width="2"/>
+  <text x="234" y="190" text-anchor="middle" class="box-title">A1</text>
+  <text x="234" y="213" text-anchor="middle" class="tiny">[h, h'/2]</text>
+  <rect x="182" y="354" width="104" height="76" rx="10" fill="#ffffff" stroke="#c9b98e" stroke-width="2"/>
+  <text x="234" y="384" text-anchor="middle" class="box-title">A2</text>
+  <text x="234" y="407" text-anchor="middle" class="tiny">[h, h'/2]</text>
+
+  <!-- GeLU -->
+  <rect x="330" y="160" width="96" height="76" rx="10" fill="#eaf2df" stroke="#abcca1" stroke-width="2"/>
+  <text x="378" y="192" text-anchor="middle" class="box-title">GeLU</text>
+  <text x="378" y="214" text-anchor="middle" class="tiny">逐元素</text>
+  <rect x="330" y="354" width="96" height="76" rx="10" fill="#eaf2df" stroke="#abcca1" stroke-width="2"/>
+  <text x="378" y="386" text-anchor="middle" class="box-title">GeLU</text>
+  <text x="378" y="408" text-anchor="middle" class="tiny">逐元素</text>
+
+  <!-- B -->
+  <rect x="470" y="160" width="104" height="76" rx="10" fill="#ffffff" stroke="#c9b98e" stroke-width="2"/>
+  <text x="522" y="190" text-anchor="middle" class="box-title">B1</text>
+  <text x="522" y="213" text-anchor="middle" class="tiny">[h'/2, h]</text>
+  <rect x="470" y="354" width="104" height="76" rx="10" fill="#ffffff" stroke="#c9b98e" stroke-width="2"/>
+  <text x="522" y="384" text-anchor="middle" class="box-title">B2</text>
+  <text x="522" y="407" text-anchor="middle" class="tiny">[h'/2, h]</text>
+
+  <!-- partial sums -->
+  <rect x="618" y="170" width="126" height="56" rx="9" fill="#f4f8ee" stroke="#b7cfad" stroke-width="1.5"/>
+  <text x="681" y="194" text-anchor="middle" class="label">部分和 Z1</text>
+  <text x="681" y="213" text-anchor="middle" class="tiny">[b, s, h]</text>
+  <rect x="618" y="364" width="126" height="56" rx="9" fill="#f8f1e2" stroke="#dccb9f" stroke-width="1.5"/>
+  <text x="681" y="388" text-anchor="middle" class="label">部分和 Z2</text>
+  <text x="681" y="407" text-anchor="middle" class="tiny">[b, s, h]</text>
+
+  <!-- arrows inside lanes -->
+  <path class="arrow" d="M126 292 L176 208"/>
+  <path class="arrow" d="M126 310 L176 382"/>
+  <path class="arrow" d="M286 198 H324"/>
+  <path class="arrow" d="M286 392 H324"/>
+  <path class="arrow" d="M426 198 H464"/>
+  <path class="arrow" d="M426 392 H464"/>
+  <path class="arrow" d="M574 198 H612"/>
+  <path class="arrow" d="M574 392 H612"/>
+
+  <!-- AllReduce -->
+  <rect x="800" y="252" width="132" height="96" rx="14" fill="#eef4e6" stroke="#7da36f" stroke-width="2.5"/>
+  <text x="866" y="286" text-anchor="middle" class="box-title">All-Reduce</text>
+  <text x="866" y="310" text-anchor="middle" class="body">Z = Z1 + Z2</text>
+  <text x="866" y="332" text-anchor="middle" class="tiny">求和后每卡都有完整 Z</text>
+
+  <path class="arrow" d="M744 198 C780 198, 786 240, 796 262"/>
+  <path class="arrow" d="M744 392 C780 392, 786 350, 796 338"/>
+
+  <!-- Z -->
+  <rect x="976" y="268" width="120" height="66" rx="10" fill="#eaf2df" stroke="#abcca1" stroke-width="2"/>
+  <text x="1036" y="296" text-anchor="middle" class="box-title">Z</text>
+  <text x="1036" y="318" text-anchor="middle" class="tiny">[b, s, h]</text>
+  <path class="arrow" d="M932 300 H970"/>
+
+  <!-- annotations -->
+  <text x="300" y="145" class="label">列并行：切输出维</text>
+  <text x="600" y="145" class="label">行并行：切输入维</text>
+  <text x="300" y="339" class="label">列并行：切输出维</text>
+  <text x="600" y="339" class="label">行并行：切输入维</text>
+
+  <text x="42" y="528" class="label">前向：A 的列切分不需要同步，GeLU 各卡独立计算；B 的行切分产生部分和，最后一次 All-Reduce 合并。</text>
+  <text x="42" y="556" class="tiny">反向与 f/g 共轭：f 在反向做 All-Reduce，g 在前向做 All-Reduce。一个 Transformer 层前向共 2 次、反向共 2 次 All-Reduce。</text>
+  <text x="42" y="582" class="tiny">切分约束：h' 与注意力头数必须能被 TP 整除；TP 组通常限制在单个 NVLink 域内。</text>
+</svg>

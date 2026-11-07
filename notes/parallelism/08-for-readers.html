@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="用餐厅、医院和长文章的类比，讲清五种并行各自解决什么问题，以及一条训练配置里的数字该怎么读。">
+    <meta name="theme-color" content="#0b2015">
+    <title>写给博客读者：大模型并行到底在解决什么 · WSJ</title>
+    <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
+    <link rel="stylesheet" href="../../assets/garden.css">
+    <link rel="stylesheet" href="../../assets/inference.css?v=20261014-reader-layout">
+    <link rel="stylesheet" href="../../assets/parallelism.css">
+    <script src="../../assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到内容</a>
+    <div class="site-frame">
+      <header class="site-header">
+        <a class="brand" href="../../index.html" aria-label="WSJ 首页">WSJ<span>.</span></a>
+        <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false">菜单 <span aria-hidden="true">☰</span></button>
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="../../index.html">首页</a><a href="../../ai-infra/index.html" aria-current="page">AI Infra</a><a href="../../papers/index.html">论文阅读</a><a href="../../projects/index.html">GitHub 项目</a><a href="../../resources/index.html">推荐资源</a>
+        </nav>
+        <a class="star-link" href="https://github.com/wsj040303/wsj040303.github.io" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 仓库点 Star">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 6 6.6 1-4.8 4.7 1.1 6.6-5.8-3.1-5.8 3.1 1.1-6.6-4.8-4.7 6.6-1z"/></svg>
+          <span>Star on GitHub</span>
+        </a>
+      </header>
+      <main class="reader-main" id="main">
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">并行计算</a><span>/</span>写给博客读者：大模型并行到底在解决什么</nav>
+        <div class="reader-heading"><h1>写给博客读者：大模型并行到底在解决什么</h1><p class="article-deck">第 8 篇 · 给非 infra 读者的通俗总结</p></div>
+        <div class="reader-grid">
+          <aside class="chapter-sidebar">
+            <details class="chapter-panel" open><summary>本文章节</summary>
+              <nav aria-label="本文章节目录"><ol class="chapter-list">
+<li><a href="#section-1">先看一个具体问题</a></li>
+<li><a href="#section-2">数据并行：多开几条一模一样的产品线</a></li>
+<li><a href="#section-3">张量并行：一道菜太大，几个人分着切</a></li>
+<li><a href="#section-4">流水线并行：把工序分成几段</a></li>
+<li><a href="#section-5">专家并行：专家门诊，病人自己找对科室</a></li>
+<li><a href="#section-6">上下文并行：一篇文章太长，分给几个人读</a></li>
+<li><a href="#section-7">为什么不能“全都开到最大”</a></li>
+<li><a href="#section-8">一条新闻里的数字怎么读</a></li>
+<li><a href="#section-9">如果你只记三句话</a></li>
+<li><a href="#section-10">参考资料</a></li>
+              </ol></nav>
+            </details>
+            <details class="chapter-panel series-panel" open><summary>本系列</summary>
+              <nav aria-label="并行专题文章列表"><ol class="series-list">
+<li><a href="01-overview.html">为什么需要并行：五种切法与一张通信地图</a></li>
+<li><a href="02-data-parallel.html">数据并行：从 DDP 到 ZeRO 与 FSDP</a></li>
+<li><a href="03-tensor-parallel.html">张量并行：在同一层内切开矩阵</a></li>
+<li><a href="04-pipeline-parallel.html">流水线并行：把层分段，让 micro-batch 流动</a></li>
+<li><a href="05-expert-parallel.html">专家并行：MoE 的 All-to-All 与负载均衡</a></li>
+<li><a href="06-context-parallel.html">序列与上下文并行：把长序列切开</a></li>
+<li><a href="07-combination.html">组合与选型：3D/4D 并行怎样落到集群</a></li>
+<li class="is-current"><a href="08-for-readers.html" aria-current="page">写给博客读者：大模型并行到底在解决什么</a></li>
+              </ol></nav>
+            </details>
+          </aside>
+          <article class="reader-content engine-article">
+<p>如果你不写训练框架，也不打算手改 Megatron 的启动参数，前面的七篇文章可能还是太“infra”了。这一篇换一种讲法：不推导公式，不列通信量，只用一家餐厅的比喻，把数据并行、张量并行、流水线并行、专家并行和上下文并行讲清楚。读完之后，你再看一条“2048 张 H800、PP16、EP64”的新闻，至少知道每个数字在说什么。</p>
+<section id="section-1"><h3>先看一个具体问题</h3>
+<p>假设你有一台 8 卡机器，每张卡 80 GB 显存，想跑一个 70B 参数的模型。FP16 下权重约 140 GB，一张卡肯定放不下；8 张卡平均分，每张 17.5 GB，看起来绰绰有余。但真正跑起来，你还会遇到 KV Cache、中间激活、通信带宽和 batch 大小的问题。所谓“并行”，就是回答一句话：<strong>这 140 GB 和它带来的计算，怎样分给 8 张卡，才能既放得下，又跑得快。</strong></p>
+<p>不同的分法，就是不同的并行。</p>
+</section>
+<section id="section-2"><h3>数据并行：多开几条一模一样的产品线</h3>
+<p>最容易想到的办法，是让 8 张卡各自保存一份完整模型，然后把 8 条不同的数据分别发给它们。每张卡独立算前向和反向，最后把 8 份梯度平均一下，保证大家的模型参数保持一致。</p>
+<p>这就像一家餐厅开了 8 条一模一样的产品线，每条线都能做全部菜品，只是接待不同的客人。它的好处是简单、效率高；坏处是每条线都要备齐所有原料——每张卡都要存一份完整模型。模型小的时候没问题，模型一大，光“备料”就把显存占满了。</p>
+<p>这就是<strong>数据并行（DP）</strong>。后面的 ZeRO 和 FSDP 并没有改变“多条产品线”的思路，只是把原料也分开存放：每张卡只保管一部分优化器状态、梯度或参数，需要时再向其他卡借。这样单卡显存降下来了，但借原料要通信，天下没有免费的午餐。</p>
+</section>
+<section id="section-3"><h3>张量并行：一道菜太大，几个人分着切</h3>
+<p>如果单张卡连一层都放不下，数据并行就不够了。这时要把“一道菜”本身拆开：一个大的矩阵乘法，沿行或沿列切成几份，每张卡算一份，最后把结果拼起来。</p>
+<p>还是用餐厅打比方：一道佛跳墙太复杂，一个厨师忙不过来，于是三个人分别负责备料、炖煮和摆盘。三个人必须配合，中间要传递半成品；传递越频繁，配合成本越高。张量并行（TP）也是这样：它能同时降低权重和激活的显存，但每一层都要通信，所以通常只在同一台机器内部做，靠 NVLink 这种高带宽链路，不轻易跨机器。</p>
+<p>这也是为什么你看到的训练配置里，TP 一般不超过 8——不是不想切得更细，而是跨了机器之后，通信会把收益吃掉。</p>
+</section>
+<section id="section-4"><h3>流水线并行：把工序分成几段</h3>
+<p>如果模型有很多层，另一种切法是按层分段：前 20 层放第一张卡，中间 20 层放第二张卡，最后 20 层放第三张卡。一个 batch 从第一段流向最后一段，像流水线一样。</p>
+<p>这就像把厨房分成切菜区、炒菜区、打包区。切菜区处理完一批，立刻传给炒菜区，自己继续切下一批；炒菜区同时开工，不用等整批菜都切完。为了不让某个区闲着，要把一个大 batch 拆成很多小批次（micro-batch），让它们在流水线上错开流动。</p>
+<p>流水线并行（PP）的通信量比张量并行小，因为它只在“区与区之间”传半成品，不用每道工序都传。但它有两个麻烦：一是流水线头尾填不满，会有一段空闲，叫“气泡”；二是如果某一段特别慢，其他段都要等它。所以 PP 适合跨机器扩展，但需要足够大的 batch 来稀释气泡。</p>
+</section>
+<section id="section-5"><h3>专家并行：专家门诊，病人自己找对科室</h3>
+<p>MoE 模型的结构不太一样：它有很多个“专家”，每个 token 只被路由到其中少数几个。DeepSeek-V3 有 256 个路由专家，每个 token 只激活 8 个，所以总参数 671B，实际计算量却只相当于 37B。</p>
+<p>把专家分到不同 GPU 上，就是专家并行（EP）。这像医院的分科：病人（token）先经过分诊台（路由器），被分配到对应的专科；不同专科在不同楼层，病人要坐电梯过去，看完再回来。这个“坐电梯”的过程，就是 All-to-All 通信，也是 EP 最贵的地方。</p>
+<p>EP 的难点不在“分”，而在“分得均匀”。如果某个专家特别热门，它所在的 GPU 就会排长队，其他 GPU 却在等人。所以真实系统要做负载均衡：复制热门专家、把专家尽量放在同一节点、动态调整路由。你听到的 EPLB、DeepEP，都是在解决这些工程问题。</p>
+</section>
+<section id="section-6"><h3>上下文并行：一篇文章太长，分给几个人读</h3>
+<p>最后一种并行，切的是序列。上下文从 4K 涨到 128K 时，单层注意力的中间结果会从几十 MB 涨到 GB 级，模型本身没变大，激活值先把显存撑爆了。</p>
+<p>这时可以把一条长序列切成几段，每张卡负责一段。但注意力和普通计算不同：每个 token 都要“看到”前面所有 token，所以每张卡不能只读自己那段。Ring Attention 的做法是让 KV 像接力棒一样沿着环传递；Ulysses 的做法是用 All-to-All 把“按序列切”换成“按头切”。名字听起来吓人，本质上都是“让每张卡看到完整上下文，同时只存一部分”。</p>
+<p>这就像一篇很长的论文，几个人分头读不同的章节，但每个人都需要知道前面章节的结论。于是大家轮流把自己的笔记传给下一个人，或者先把笔记重新分组，让每个人负责一个主题、通读全文。</p>
+<p>上下文并行（CP）主要用在长上下文训练；推理时更常见的是 KV Cache 的分片和分页管理，因为 decode 阶段每步只有一个 token，切序列的收益有限。</p>
+</section>
+<section id="section-7"><h3>为什么不能“全都开到最大”</h3>
+<p>五种并行看起来都能省显存，为什么不全开？因为每一种都要通信，而通信是有代价的。</p>
+<ul>
+<li>数据并行每个 step 同步一次梯度，量大但频率低；</li>
+<li>张量并行每层同步一次，频率高，必须待在机内；</li>
+<li>流水线并行只传边界激活，量小，但有气泡；</li>
+<li>专家并行的 All-to-All 最贵，还受路由负载影响；</li>
+<li>上下文并行要交换 KV，长序列下通信量随序列增长。</li>
+</ul>
+<p>所以真实配置是在做一道约束优化题：<strong>用最少的通信，换到足够的显存，同时让每张卡还有足够大的矩阵乘法可算。</strong> 一个常见的经验顺序是：先数据并行；模型放不下再加张量并行（不超过单机 8 卡）；还不够再加流水线并行（跨机器）；序列很长时加上下文并行；MoE 模型再加专家并行。</p>
+</section>
+<section id="section-8"><h3>一条新闻里的数字怎么读</h3>
+<p>现在再看一条典型的训练配置：“2048 张 H800，16 路流水线并行，64 路专家并行，ZeRO-1 数据并行，不使用张量并行。”</p>
+<p>你可以这样拆：</p>
+<ul>
+<li>2048 张卡是总数；</li>
+<li>16 路 PP 把模型按层分成 16 段，跨节点放；</li>
+<li>64 路 EP 把 256 个专家摊到 64 个 rank 上，每张卡只存 4 个专家；</li>
+<li>剩下的卡数用 DP 补齐，ZeRO-1 负责分摊优化器状态；</li>
+<li>TP=1，说明它判断节点内带宽和模型形状不适合再做张量切分。</li>
+</ul>
+<p>同一条新闻里如果写“8 路张量并行、8 路流水线并行”，那通常意味着模型是稠密的，TP 压在单机内，PP 跨机，剩下的用 DP 扩。配置没有绝对的对错，只有“把哪种通信放在了哪种链路上”。</p>
+</section>
+<section id="section-9"><h3>如果你只记三句话</h3>
+<p>第一，并行不是把模型切成五份，而是沿着五个不同的维度切：batch、层内、层间、专家、序列。每种切法解决的问题不同。</p>
+<p>第二，切得越细，单卡显存越小，但通信越多。TP 通信最频繁，所以留在机内；PP 通信最少，所以跨机；EP 的 All-to-All 最贵，所以要重叠和均衡。</p>
+<p>第三，先算账，再选型：权重、梯度、优化器状态、激活、KV Cache，哪一项先爆，就用对应的并行去救它。不要因为“别人都开 TP=8”就跟着开。</p>
+<p>如果你想继续往下看，可以从<a class="inline-link" href="01-overview.html">并行总览</a>开始，再按 DP、TP、PP、EP、CP 的顺序读技术细节；每一篇文末都列了 NVIDIA 官方文档、论文和中文博客，方便你回到原始材料核对。</p>
+</section>
+<section id="section-10"><h3>参考资料</h3>
+<ul>
+<li>NVIDIA Megatron Core：<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Parallelism Strategies Guide</a></li>
+<li>NVIDIA NeMo：<a class="inline-link" href="https://docs.nvidia.com/nemo-framework/user-guide/25.11/nemotoolkit/features/parallelisms.html" target="_blank" rel="noopener noreferrer">Parallelisms</a></li>
+<li>DeepSeek-AI：<a class="inline-link" href="https://arxiv.org/html/2412.19437" target="_blank" rel="noopener noreferrer">DeepSeek-V3 Technical Report</a></li>
+<li>知乎：<a class="inline-link" href="https://zhuanlan.zhihu.com/p/656639603" target="_blank" rel="noopener noreferrer">图解大模型训练之：数据并行（DP、DDP 与 ZeRO）</a></li>
+<li>CSDN：<a class="inline-link" href="https://blog.csdn.net/yuanyuanxingxing/article/details/132412847" target="_blank" rel="noopener noreferrer">数据并行（DP）、张量模型并行（TP）、流水线并行（PP）</a></li>
+<li>LLM Infra Atlas：<a class="inline-link" href="https://llm-infra-atlas.github.io/parallel/" target="_blank" rel="noopener noreferrer">大规模训练的并行策略总览</a></li>
+</ul>
+</section>
+            <div class="reader-actions"><a href="index.html">返回并行专题目录</a>
+<a href="07-combination.html">上一篇：组合与选型：3D/4D 并行怎样落到集群</a></div>
+          </article>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

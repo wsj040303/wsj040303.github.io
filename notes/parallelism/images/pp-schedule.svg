@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">GPipe 与 1F1B 的流水线时序</title>
+  <desc id="desc">四个 stage、四个 micro-batch。GPipe 先完成全部前向再统一反向，激活值显存为 O(m)；1F1B 在稳态下一前一后交替，气泡相同但激活值显存降为 O(p)。</desc>
+  <defs>
+    <style>
+      text { font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #184a32; }
+      .title { font-size: 30px; font-weight: 750; }
+      .subtitle { font-size: 16px; fill: #52705b; }
+      .panel-title { font-size: 21px; font-weight: 720; }
+      .body { font-size: 14px; fill: #3e5b46; }
+      .tiny { font-size: 12px; fill: #5a7260; }
+      .stage { font-size: 14px; font-weight: 650; fill: #39714d; }
+      .cell { font-size: 12px; font-weight: 700; }
+      .bubble-label { font-size: 13px; font-weight: 600; fill: #8a8f7f; }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="684" rx="24" fill="#fffdf7" stroke="#cbdcc4" stroke-width="2"/>
+  <text x="42" y="54" class="title">GPipe 与 1F1B：同样的气泡，不同的激活值</text>
+  <text x="43" y="82" class="subtitle">p = 4 个 stage，m = 4 个 micro-batch。绿色 F 为前向，橙色 B 为反向，灰色为空闲；反向从后往前逐级传递梯度。</text>
+
+  <!-- GPipe panel -->
+  <rect x="40" y="108" width="1120" height="258" rx="16" fill="#f8f6ee" stroke="#d8d2bd" stroke-width="1.5"/>
+  <text x="62" y="140" class="panel-title">GPipe：先全部前向，再全部反向</text>
+  <text x="520" y="140" class="body">激活值需同时保存 m 份，显存 O(m)</text>
+
+  <g>
+    <rect x="230" y="158" width="672" height="36" rx="6" fill="#eceee6"/>
+    <rect x="230" y="200" width="672" height="36" rx="6" fill="#eceee6"/>
+    <rect x="230" y="242" width="672" height="36" rx="6" fill="#eceee6"/>
+    <rect x="230" y="284" width="672" height="36" rx="6" fill="#eceee6"/>
+  </g>
+  <text x="218" y="181" text-anchor="end" class="stage">stage 0</text>
+  <text x="218" y="223" text-anchor="end" class="stage">stage 1</text>
+  <text x="218" y="265" text-anchor="end" class="stage">stage 2</text>
+  <text x="218" y="307" text-anchor="end" class="stage">stage 3</text>
+
+  <!-- GPipe cells: x = 230 + index*48, width 44 -->
+  <g>
+    <!-- s0: F1 F2 F3 F4 ... B4 B3 B2 B1 -->
+    <rect x="230" y="158" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="252" y="181" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="278" y="158" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="300" y="181" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="326" y="158" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="181" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="374" y="158" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="181" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="710" y="158" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="181" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+    <rect x="758" y="158" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="181" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="806" y="158" width="44" height="36" rx="5" fill="#d9a35e"/><text x="828" y="181" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="854" y="158" width="44" height="36" rx="5" fill="#d9a35e"/><text x="876" y="181" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+
+    <!-- s1: . F1 F2 F3 F4 .... B4 B3 B2 B1 . -->
+    <rect x="278" y="200" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="300" y="223" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="326" y="200" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="223" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="374" y="200" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="223" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="422" y="200" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="223" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="662" y="200" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="223" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+    <rect x="710" y="200" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="223" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="758" y="200" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="223" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="806" y="200" width="44" height="36" rx="5" fill="#d9a35e"/><text x="828" y="223" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+
+    <!-- s2: . . F1 F2 F3 F4 ... B4 B3 B2 B1 . . -->
+    <rect x="326" y="242" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="265" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="374" y="242" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="265" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="422" y="242" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="265" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="470" y="242" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="492" y="265" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="614" y="242" width="44" height="36" rx="5" fill="#d9a35e"/><text x="636" y="265" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+    <rect x="662" y="242" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="265" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="710" y="242" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="265" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="758" y="242" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="265" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+
+    <!-- s3: . . . F1 F2 F3 F4 B4 B3 B2 B1 . . . -->
+    <rect x="374" y="284" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="307" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="422" y="284" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="307" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="470" y="284" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="492" y="307" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="518" y="284" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="540" y="307" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="566" y="284" width="44" height="36" rx="5" fill="#d9a35e"/><text x="588" y="307" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+    <rect x="614" y="284" width="44" height="36" rx="5" fill="#d9a35e"/><text x="636" y="307" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="662" y="284" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="307" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="710" y="284" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="307" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+  </g>
+
+  <path d="M470 340 H566" stroke="#b9a86e" stroke-width="2" stroke-dasharray="5 4"/>
+  <text x="518" y="357" text-anchor="middle" class="bubble-label">头部填充 / 尾部排空形成气泡</text>
+
+  <!-- 1F1B panel -->
+  <rect x="40" y="388" width="1120" height="240" rx="16" fill="#f4f8ee" stroke="#c6d9bd" stroke-width="1.5"/>
+  <text x="62" y="420" class="panel-title">1F1B：稳态下一前一后</text>
+  <text x="520" y="420" class="body">每卡只需保存约 p 份激活，显存 O(p)</text>
+
+  <g>
+    <rect x="230" y="438" width="672" height="36" rx="6" fill="#e8eee2"/>
+    <rect x="230" y="480" width="672" height="36" rx="6" fill="#e8eee2"/>
+    <rect x="230" y="522" width="672" height="36" rx="6" fill="#e8eee2"/>
+    <rect x="230" y="564" width="672" height="36" rx="6" fill="#e8eee2"/>
+  </g>
+  <text x="218" y="461" text-anchor="end" class="stage">stage 0</text>
+  <text x="218" y="503" text-anchor="end" class="stage">stage 1</text>
+  <text x="218" y="545" text-anchor="end" class="stage">stage 2</text>
+  <text x="218" y="587" text-anchor="end" class="stage">stage 3</text>
+
+  <g>
+    <!-- s0: F1 F2 F3 F4 ...... B1 B2 B3 B4 -->
+    <rect x="230" y="438" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="252" y="461" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="278" y="438" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="300" y="461" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="326" y="438" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="461" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="374" y="438" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="461" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="710" y="438" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="461" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+    <rect x="758" y="438" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="461" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="806" y="438" width="44" height="36" rx="5" fill="#d9a35e"/><text x="828" y="461" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="854" y="438" width="44" height="36" rx="5" fill="#d9a35e"/><text x="876" y="461" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+
+    <!-- s1: . F1 F2 F3 F4 ..... B1 B2 B3 B4 . -->
+    <rect x="278" y="480" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="300" y="503" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="326" y="480" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="503" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="374" y="480" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="503" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="422" y="480" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="503" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="662" y="480" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="503" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+    <rect x="710" y="480" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="503" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="758" y="480" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="503" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="806" y="480" width="44" height="36" rx="5" fill="#d9a35e"/><text x="828" y="503" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+
+    <!-- s2: . . F1 F2 F3 F4 ... B1 B2 B3 B4 . . -->
+    <rect x="326" y="522" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="348" y="545" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="374" y="522" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="545" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="422" y="522" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="545" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="470" y="522" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="492" y="545" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="614" y="522" width="44" height="36" rx="5" fill="#d9a35e"/><text x="636" y="545" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+    <rect x="662" y="522" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="545" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="710" y="522" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="545" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="758" y="522" width="44" height="36" rx="5" fill="#d9a35e"/><text x="780" y="545" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+
+    <!-- s3: . . . F1 F2 F3 F4 B1 B2 B3 B4 . . . -->
+    <rect x="374" y="564" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="396" y="587" text-anchor="middle" class="cell" fill="#173d27">F1</text>
+    <rect x="422" y="564" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="444" y="587" text-anchor="middle" class="cell" fill="#173d27">F2</text>
+    <rect x="470" y="564" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="492" y="587" text-anchor="middle" class="cell" fill="#173d27">F3</text>
+    <rect x="518" y="564" width="44" height="36" rx="5" fill="#8fbb7f"/><text x="540" y="587" text-anchor="middle" class="cell" fill="#173d27">F4</text>
+    <rect x="566" y="564" width="44" height="36" rx="5" fill="#d9a35e"/><text x="588" y="587" text-anchor="middle" class="cell" fill="#4a2d0c">B1</text>
+    <rect x="614" y="564" width="44" height="36" rx="5" fill="#d9a35e"/><text x="636" y="587" text-anchor="middle" class="cell" fill="#4a2d0c">B2</text>
+    <rect x="662" y="564" width="44" height="36" rx="5" fill="#d9a35e"/><text x="684" y="587" text-anchor="middle" class="cell" fill="#4a2d0c">B3</text>
+    <rect x="710" y="564" width="44" height="36" rx="5" fill="#d9a35e"/><text x="732" y="587" text-anchor="middle" class="cell" fill="#4a2d0c">B4</text>
+  </g>
+
+  <text x="42" y="656" class="body">气泡占比 ≈ (p − 1) / (m + p − 1)；交错式流水线再除以虚拟 stage 数 v，约为 (p − 1) / (v × m)。</text>
+  <text x="42" y="680" class="tiny">m 越大气泡越小，但 global batch 和调度开销也越大；1F1B 的价值在于用调度把激活值显存从 O(m) 降到 O(p)。</text>
+</svg>

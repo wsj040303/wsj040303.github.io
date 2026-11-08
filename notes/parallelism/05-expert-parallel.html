@@ -45,18 +45,6 @@
 <li><a href="#section-10">参考资料</a></li>
               </ol></nav>
             </details>
-            <details class="chapter-panel series-panel" open><summary>本系列</summary>
-              <nav aria-label="并行专题文章列表"><ol class="series-list">
-<li><a href="01-overview.html">大模型并行的五个维度与通信约束</a></li>
-<li><a href="02-data-parallel.html">数据并行：模型复制、梯度同步与状态分片</a></li>
-<li><a href="03-tensor-parallel.html">张量并行：层内切分、通信模式与适用边界</a></li>
-<li><a href="04-pipeline-parallel.html">流水线并行：调度、气泡与激活值显存</a></li>
-<li class="is-current"><a href="05-expert-parallel.html" aria-current="page">专家并行：MoE 路由、All-to-All 与负载均衡</a></li>
-<li><a href="06-context-parallel.html">上下文并行：长序列切分与注意力通信</a></li>
-<li><a href="07-combination.html">并行组合与选型：约束、配置与排障</a></li>
-<li><a href="08-for-readers.html">大模型并行入门：五种维度的技术说明</a></li>
-              </ol></nav>
-            </details>
           </aside>
           <article class="reader-content engine-article">
 <p>专家并行（Expert Parallelism，EP）把混合专家（Mixture-of-Experts，MoE）模型的路由专家分散到不同 GPU。每个 token 由路由器选出少量专家，被发送到持有这些专家的 GPU 上计算，再返回原 GPU 加权求和。EP 降低单卡专家权重的占用，代价是两次全对全（All-to-All）通信，以及由路由结果引起的负载不均衡。本文说明 MoE 层的结构、EP 的分发与回收过程、负载均衡机制，以及 DeepSeek-V3 的公开配置。</p>

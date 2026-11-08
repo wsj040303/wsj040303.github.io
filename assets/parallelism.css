@@ -3,6 +3,7 @@
 .topic-list.parallel-topics .topic-card { min-height: 168px; }
 .topic-list.parallel-topics .topic-card h2 { font-size: clamp(20px, 1.7vw, 26px); }
 .topic-list.parallel-topics .topic-card p { font-size: 14px; line-height: 1.78; }
+.topic-list.parallel-topics .topic-card:last-child { grid-column: 1 / -1; }
 
 .parallel-catalog-note {
   margin: 22px 0 0;
@@ -12,39 +13,14 @@
 }
 
 .reader-heading .article-deck { margin: 15px 0 0; color: #58755d; font-size: 15px; line-height: 1.7; }
-.chapter-panel + .chapter-panel { margin-top: 14px; }
-.series-panel { border-top: 1px solid #3b6547; }
-.series-list { margin: 0; padding: 10px 14px 16px; list-style: none; }
-.series-list li + li { margin-top: 2px; }
-.series-list a {
-  display: block;
-  padding: 7px 9px;
-  border-radius: 7px;
-  color: #bfd2c1;
-  font-size: 14px;
-  line-height: 1.55;
-}
-.series-list a:hover { background: #1b3526; color: #eaf7e7; }
-.series-list li.is-current a { background: #234633; color: #d8f2c8; font-weight: 650; }
-
-.reader-content .series-note {
-  margin: 26px 0 0;
-  padding: 14px 16px;
-  border-left: 3px solid #72a95a;
-  border-radius: 0 8px 8px 0;
-  background: #f1f7ea;
-  color: #3f5e48;
-  font-size: 15px;
-  line-height: 1.8;
-}
 
 .table-scroll { overflow-x: auto; }
 .engine-article .table-scroll table { min-width: 620px; }
 
 @media (max-width: 900px) {
   .topic-list.parallel-topics { grid-template-columns: minmax(0, 1fr); }
+  .topic-list.parallel-topics .topic-card:last-child { grid-column: auto; }
 }
 @media (max-width: 650px) {
-  .series-panel { display: none; }
   .engine-article .engine-code code { font-size: 13px; }
 }

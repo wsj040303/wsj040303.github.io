@@ -50,12 +50,6 @@ const chapters = [
     description: "DP、TP、PP、EP、CP 的组合公式、通信成本与拓扑匹配、GPT-3/MT-NLG/DeepSeek-V3 的公开配置，以及配置排障顺序。",
     deck: "第 7 篇 · 组合公式、真实配置与排障",
   },
-  {
-    stem: "08-for-readers",
-    title: "大模型并行入门：五种维度的技术说明",
-    description: "面向没有训练框架经验的读者，说明五种并行维度的定义、切分对象、通信方式与显存效果，并解释一组训练配置中的数字。",
-    deck: "第 8 篇 · 面向非 infra 读者的技术说明",
-  },
 ].map((chapter, index, all) => ({
   ...chapter,
   previous: index > 0 ? { href: all[index - 1].stem + ".html", text: "上一篇：" + all[index - 1].title } : null,
@@ -153,7 +147,7 @@ function renderMarkdown(input) {
   return html.trimEnd();
 }
 
-function renderChapter(chapter, index) {
+function renderChapter(chapter) {
   const sourcePath = path.join(articleDir, chapter.stem + ".md");
   const source = fs.readFileSync(sourcePath, "utf8");
   const titleMatch = source.match(/^# (.+)$/m);
@@ -178,11 +172,6 @@ function renderChapter(chapter, index) {
   ].filter(Boolean).join("\n");
   const toc = sections.map((section) =>
     '<li><a href="#' + section.id + '">' + escapeHtml(section.name) + '</a></li>'
-  ).join("\n");
-  const series = chapters.map((item, itemIndex) =>
-    '<li' + (itemIndex === index ? ' class="is-current"' : '') + '><a href="' +
-    item.stem + '.html"' + (itemIndex === index ? ' aria-current="page"' : '') + '>' +
-    escapeHtml(item.title) + '</a></li>'
   ).join("\n");
   const actions = [
     '<a href="index.html">返回并行专题目录</a>',
@@ -229,11 +218,6 @@ function renderChapter(chapter, index) {
     toc,
     '              </ol></nav>',
     '            </details>',
-    '            <details class="chapter-panel series-panel" open><summary>本系列</summary>',
-    '              <nav aria-label="并行专题文章列表"><ol class="series-list">',
-    series,
-    '              </ol></nav>',
-    '            </details>',
     '          </aside>',
     '          <article class="reader-content engine-article">',
     body,
@@ -251,7 +235,7 @@ function renderChapter(chapter, index) {
 let stale = false;
 chapters.forEach((chapter, index) => {
   const pagePath = path.join(articleDir, chapter.stem + ".html");
-  const html = renderChapter(chapter, index);
+  const html = renderChapter(chapter);
   if (checkOnly) {
     if (!fs.existsSync(pagePath) || fs.readFileSync(pagePath, "utf8") !== html) {
       console.error(pagePath + " 与 Markdown 源文件不一致；运行 npm run build:parallelism");

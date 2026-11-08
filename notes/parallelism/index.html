@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="大模型并行专题：数据并行、张量并行、流水线并行、专家并行与上下文并行，以及 3D/4D 并行组合与选型。">
+    <meta name="description" content="大模型并行专题：数据并行、张量并行、流水线并行、专家并行与上下文并行的原理、通信、显存与配置。">
     <meta name="theme-color" content="#0b2015">
     <title>并行计算 · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
@@ -35,38 +35,38 @@
           <div class="topic-list parallel-topics">
             <a class="topic-card" href="01-overview.html">
               <h2>并行总览</h2>
-              <p>为什么需要并行、五种切法分别切什么，以及 All-Reduce、All-Gather、All-to-All 和 P2P 的通信地图。</p>
+              <p>五种并行维度分别切分什么，使用哪些集合通信原语，以及各维度与 NVLink、InfiniBand 拓扑的对应关系。</p>
             </a>
             <a class="topic-card" href="02-data-parallel.html">
               <h2>数据并行 DP</h2>
-              <p>复制模型、切分 batch；从 DDP 的梯度 All-Reduce 到 ZeRO-1/2/3 与 FSDP 的状态分片。</p>
+              <p>DDP 的梯度同步、训练状态的显存构成、ZeRO-1/2/3 的分片阶段与 FSDP 的按层参数聚合。</p>
             </a>
             <a class="topic-card" href="03-tensor-parallel.html">
               <h2>张量并行 TP</h2>
-              <p>Megatron 的列并行与行并行、Attention 按头切分、每层四次 All-Reduce 与 NVLink 域约束。</p>
+              <p>列并行与行并行、MLP 与 Attention 的通信位置、每层两次 All-Reduce 与 NVLink 域约束。</p>
             </a>
             <a class="topic-card" href="04-pipeline-parallel.html">
               <h2>流水线并行 PP</h2>
-              <p>GPipe、1F1B、交错式调度的时序，气泡公式，以及激活值显存从 O(m) 到 O(p) 的取舍。</p>
+              <p>GPipe、1F1B、交错式调度的时序、气泡公式，以及激活值显存从 O(m) 到 O(p) 的降阶。</p>
             </a>
             <a class="topic-card" href="05-expert-parallel.html">
               <h2>专家并行 EP</h2>
-              <p>MoE 的稀疏激活、Dispatch/Combine 两次 All-to-All、EPLB 负载均衡与 DeepEP 低延迟内核。</p>
+              <p>MoE 路由、Dispatch/Combine 两次 All-to-All、EPLB 的冗余专家放置与 DeepEP 通信内核。</p>
             </a>
             <a class="topic-card" href="06-context-parallel.html">
-              <h2>序列与上下文并行</h2>
-              <p>Megatron 序列并行、Ring Attention 与 Ulysses：长序列下激活显存和通信量的两种解法。</p>
+              <h2>上下文并行 CP</h2>
+              <p>Megatron 序列并行与长序列上下文并行的区别、Ring Attention 的 KV 传递与 Ulysses 的 All-to-All 重排。</p>
             </a>
             <a class="topic-card" href="07-combination.html">
               <h2>组合与选型</h2>
-              <p>把 DP、TP、PP、EP、CP 组合成 world size，对照 GPT-3、MT-NLG 与 DeepSeek-V3 的真实配置。</p>
+              <p>DP、TP、PP、EP、CP 的组合公式、通信成本与拓扑匹配，以及 GPT-3、MT-NLG、DeepSeek-V3 的公开配置。</p>
             </a>
             <a class="topic-card" href="08-for-readers.html">
-              <h2>写给博客读者</h2>
-              <p>不用公式，用餐厅、医院和长文章的类比，讲清五种并行各自解决什么问题，以及新闻里的并行配置怎么读。</p>
+              <h2>并行入门</h2>
+              <p>面向没有训练框架经验的读者，说明五种维度的定义、切分对象、通信方式与显存效果。</p>
             </a>
           </div>
-          <p class="parallel-catalog-note">这一组文章不绑定某个框架。每篇先讲清“切的是什么、通信多少、显存省在哪”，再落到 Megatron、DeepSpeed、PyTorch FSDP 和 DeepSeek 的实现与公开配置；文末列出 NVIDIA 官方文档、论文和中文博客，便于回查。</p>
+          <p class="parallel-catalog-note">这一组文章以 NVIDIA Megatron、NeMo、PyTorch FSDP 和 DeepSeek 的公开实现与配置为依据。每篇给出切分对象、通信模式、显存收益和适用条件；文末列出官方文档、论文与中文博客，便于核对原始材料。</p>
         </section>
       </main>
     </div>

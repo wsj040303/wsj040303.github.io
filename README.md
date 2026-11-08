@@ -51,7 +51,7 @@ Nano-vLLM 解读的正文源文件是 [第 1 章](notes/inference/nano-vllm/01-o
 
 ## 编辑并行计算专题
 
-正文源文件位于 `notes/parallelism/`，共 8 篇：总览、数据并行、张量并行、流水线并行、专家并行、序列与上下文并行、组合与选型，以及一篇面向普通博客读者的通俗总结。图片放在同目录的 `images/`。修改 Markdown 后，运行 `npm run build:parallelism` 生成对应 HTML；运行 `npm run check:parallelism` 检查生成页是否与 Markdown 一致。专题入口位于 `ai-infra/index.html → notes/parallelism/index.html`。
+正文源文件位于 `notes/parallelism/`，共 8 篇：总览、数据并行、张量并行、流水线并行、专家并行、序列与上下文并行、组合与选型，以及一篇面向非 infra 读者的技术说明。图片放在同目录的 `images/`。修改 Markdown 后，运行 `npm run build:parallelism` 生成对应 HTML；运行 `npm run check:parallelism` 检查生成页是否与 Markdown 一致。专题入口位于 `ai-infra/index.html → notes/parallelism/index.html`。
 
 ## 编辑 PiKV 阅读报告
 

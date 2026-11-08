@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Megatron 序列并行、Ring Attention 与 DeepSpeed Ulysses 的区别，长上下文训练中激活显存和通信量的取舍。">
+    <meta name="description" content="Megatron 序列并行与长序列上下文并行的区别、Ring Attention 的 KV 传递、Ulysses 的 All-to-All 重排，以及 causal mask 的负载均衡。">
     <meta name="theme-color" content="#0b2015">
-    <title>序列与上下文并行：把长序列切开 · WSJ</title>
+    <title>上下文并行：长序列切分与注意力通信 · WSJ</title>
     <link rel="stylesheet" href="../../assets/site.css?v=20261008-layout">
     <link rel="stylesheet" href="../../assets/garden.css">
     <link rel="stylesheet" href="../../assets/inference.css?v=20261014-reader-layout">
@@ -27,45 +27,42 @@
         </a>
       </header>
       <main class="reader-main" id="main">
-        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">并行计算</a><span>/</span>序列与上下文并行：把长序列切开</nav>
-        <div class="reader-heading"><h1>序列与上下文并行：把长序列切开</h1><p class="article-deck">第 6 篇 · 序列切分、环形注意力和头维 All-to-All</p></div>
+        <nav class="breadcrumb" aria-label="面包屑导航"><a href="../../index.html">首页</a><span>/</span><a href="../../ai-infra/index.html">AI Infra</a><span>/</span><a href="index.html">并行计算</a><span>/</span>上下文并行：长序列切分与注意力通信</nav>
+        <div class="reader-heading"><h1>上下文并行：长序列切分与注意力通信</h1><p class="article-deck">第 6 篇 · Ring Attention、Ulysses 与 Megatron CP</p></div>
         <div class="reader-grid">
           <aside class="chapter-sidebar">
             <details class="chapter-panel" open><summary>本文章节</summary>
               <nav aria-label="本文章节目录"><ol class="chapter-list">
-<li><a href="#section-1">为什么长序列需要单独切</a></li>
-<li><a href="#section-2">Ring Attention：把 KV 块沿着环传递</a></li>
-<li><a href="#section-3">DeepSpeed Ulysses：用 All-to-All 换头维</a></li>
-<li><a href="#section-4">负载均衡：causal mask 带来的麻烦</a></li>
-<li><a href="#section-5">CP 与 TP 的关系</a></li>
-<li><a href="#section-6">推理中的长上下文</a></li>
-<li><a href="#section-7">什么时候用 CP</a></li>
-<li><a href="#section-8">参考资料</a></li>
+<li><a href="#section-1">问题定位</a></li>
+<li><a href="#section-2">序列并行的两种含义</a></li>
+<li><a href="#section-3">Ring Attention</a></li>
+<li><a href="#section-4">DeepSpeed Ulysses</a></li>
+<li><a href="#section-5">Megatron 上下文并行</a></li>
+<li><a href="#section-6">负载均衡与显存</a></li>
+<li><a href="#section-7">CP 与 TP 的关系</a></li>
+<li><a href="#section-8">推理中的长上下文</a></li>
+<li><a href="#section-9">限制与适用条件</a></li>
+<li><a href="#section-10">结论</a></li>
+<li><a href="#section-11">参考资料</a></li>
               </ol></nav>
             </details>
             <details class="chapter-panel series-panel" open><summary>本系列</summary>
               <nav aria-label="并行专题文章列表"><ol class="series-list">
-<li><a href="01-overview.html">为什么需要并行：五种切法与一张通信地图</a></li>
-<li><a href="02-data-parallel.html">数据并行：从 DDP 到 ZeRO 与 FSDP</a></li>
-<li><a href="03-tensor-parallel.html">张量并行：在同一层内切开矩阵</a></li>
-<li><a href="04-pipeline-parallel.html">流水线并行：把层分段，让 micro-batch 流动</a></li>
-<li><a href="05-expert-parallel.html">专家并行：MoE 的 All-to-All 与负载均衡</a></li>
-<li class="is-current"><a href="06-context-parallel.html" aria-current="page">序列与上下文并行：把长序列切开</a></li>
-<li><a href="07-combination.html">组合与选型：3D/4D 并行怎样落到集群</a></li>
-<li><a href="08-for-readers.html">写给博客读者：大模型并行到底在解决什么</a></li>
+<li><a href="01-overview.html">大模型并行的五个维度与通信约束</a></li>
+<li><a href="02-data-parallel.html">数据并行：模型复制、梯度同步与状态分片</a></li>
+<li><a href="03-tensor-parallel.html">张量并行：层内切分、通信模式与适用边界</a></li>
+<li><a href="04-pipeline-parallel.html">流水线并行：调度、气泡与激活值显存</a></li>
+<li><a href="05-expert-parallel.html">专家并行：MoE 路由、All-to-All 与负载均衡</a></li>
+<li class="is-current"><a href="06-context-parallel.html" aria-current="page">上下文并行：长序列切分与注意力通信</a></li>
+<li><a href="07-combination.html">并行组合与选型：约束、配置与排障</a></li>
+<li><a href="08-for-readers.html">大模型并行入门：五种维度的技术说明</a></li>
               </ol></nav>
             </details>
           </aside>
           <article class="reader-content engine-article">
-<p>前面几种并行都在切模型：DP 切 batch，TP 切层内矩阵，PP 切层，EP 切专家。序列并行换了一个维度：模型不动，把一条长序列切成几段，每张卡只处理其中一段。它解决的是长上下文带来的激活值爆炸——当序列从 4K 涨到 128K，单层注意力的中间结果可能从几十 MB 涨到 GB 级，单卡无论怎么切模型都放不下。</p>
-<p>“序列并行”这个词有两个常见含义，先分清：</p>
-<ul>
-<li><strong>Megatron 序列并行（SP）</strong>：TP 的配套优化，切的是 LayerNorm、Dropout 等逐点操作的激活，目的是减少 TP 区域外的激活冗余。</li>
-<li><strong>序列/上下文并行（CP）</strong>：把整条序列切到多张卡上，每张卡负责一段 token 的完整 Transformer 计算，注意力通过交换 KV 完成。</li>
-</ul>
-<p>这一篇主要讲后者，最后再回到前者，说明两者在真实配置里怎样配合。</p>
-<section id="section-1"><h3>为什么长序列需要单独切</h3>
-<p>先看一笔注意力激活账。设 <code>batch=1</code>、<code>seq=128K</code>、<code>64</code> 个 Q 头、<code>8</code> 个 KV 头、<code>head_dim=128</code>、BF16，单层注意力需要保存：</p>
+<p>上下文并行（Context Parallelism，CP）沿序列维切分输入，每张 GPU 负责一段 token 的 Transformer 计算。它解决的是长上下文下激活值超过单卡容量的问题，代价是注意力层需要跨卡交换键值（Key-Value，KV）。本文区分 Megatron 序列并行与长序列上下文并行，说明 Ring Attention、DeepSpeed Ulysses 和 Megatron CP 的通信模式，以及长序列训练和推理中的适用条件。</p>
+<section id="section-1"><h3>问题定位</h3>
+<p>设 <code>batch=1</code>、<code>seq=128K</code>、64 个 Q 头、8 个 KV 头、<code>head_dim=128</code>、BF16。单层注意力需要保存的 Q、K、V 和输出如下：</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -95,52 +92,64 @@
 <td>2 GB</td>
 </tr>
 </tbody></table></div>
-<p>单层就要 5 GB，几十层堆起来，80 GB 卡很快见底。这还不算 MLP 的中间激活和反向所需的保存。把序列按 CP 切成 8 段，每张卡只保存 <code>1/8</code> 的 Q/K/V/O，激活值直接降到原来的八分之一。<a class="inline-link" href="https://pfcc.blog/posts/context-parallel-sharing" target="_blank" rel="noopener noreferrer">飞桨开源社区 · 大模型训练中的序列并行</a></p>
-<p>但注意力不是逐点操作。每个 query token 都要和序列里所有 key 做点积，如果每张卡只持有自己那段 KV，它就无法独立完成注意力。所以 CP 的核心问题是：怎样在切分序列的同时，让每张卡看到完整的 KV，并且通信量可控。</p>
+<p>单层合计 5 GB，几十层堆叠后，80 GB 卡无法容纳。该算例取自<a class="inline-link" href="https://pfcc.blog/posts/context-parallel-sharing" target="_blank" rel="noopener noreferrer">飞桨开源社区的序列并行分析</a>。把序列按 CP 切成 8 段，每张卡只保存 <code>1/8</code> 的 Q、K、V、O，激活值降到原来的八分之一。</p>
+<p>注意力不是逐点操作。每个 query token 都要与序列中所有 key 计算点积；每张卡只持有本地 KV 时，无法独立完成完整注意力。CP 的核心问题是：在切分序列的同时，让每张卡获得完整的 KV，并控制通信量。</p>
 </section>
-<section id="section-2"><h3>Ring Attention：把 KV 块沿着环传递</h3>
-<p>Ring Attention 的做法很直接：每张卡持有自己那段序列的 Q、K、V，然后沿着一个环，把自己的 KV 块依次传给下一张卡；每收到一块 KV，就用它和本地的 Q 计算一部分注意力，直到所有 KV 块都路过一遍。</p>
+<section id="section-2"><h3>序列并行的两种含义</h3>
+<p>“序列并行”在文献和框架中对应两种不同机制：</p>
+<ul>
+<li><strong>Megatron 序列并行</strong>：张量并行的配套优化，切分 LayerNorm、Dropout 等逐点操作的激活，目标是减少 TP 区域外的激活冗余。它不改变注意力的计算范围，序列长度仍需被 TP 整除。</li>
+<li><strong>上下文并行（长序列序列并行）</strong>：把整条序列切到多张卡上，每张卡负责一段 token 的完整 Transformer 计算，注意力层通过 P2P 或 All-to-All 交换 KV。</li>
+</ul>
+<p>两者的切分对象和通信模式不同。本文后续内容均指第二种。Megatron 序列并行在第 3 篇讨论张量并行时已说明，它与 CP 可以同时使用：SP 在 TP 组内切逐点激活，CP 在更外层切整条序列。</p>
+</section>
+<section id="section-3"><h3>Ring Attention</h3>
+<p>Ring Attention 让每张卡持有本地序列段的 Q、K、V，然后沿一个环，把本地 KV 块依次传给下一张卡。每收到一块 KV，就用它和本地 Q 计算一部分注意力，直到所有 KV 块都经过一次。</p>
 <figure class="engine-code"><figcaption>代码片段 <span>text</span></figcaption><pre><code>rank 0 持有 Q0 K0 V0
 rank 1 持有 Q1 K1 V1
 rank 2 持有 Q2 K2 V2
 rank 3 持有 Q3 K3 V3
 
-第 1 步：每张卡用本地 KV 算局部 attention
-第 2 步：K/V 传给下一张卡，继续算
-第 3 步：再传一圈，直到所有 KV 块都参与过</code></pre></figure>
-<p>难点在于 softmax 不能简单地分段相加。Ring Attention 使用 online softmax：每算完一块 KV，就更新当前的最大值和归一化因子，把新块的贡献合并进来。这样不需要保存完整的 <code>S × S</code> 注意力矩阵，显存从 <code>O(S²)</code> 降到 <code>O(S)</code>，计算和通信还能重叠——当前块的注意力在算，下一块 KV 已经在路上。</p>
-<p>环形传递的通信量是每张卡把本地 KV 传 <code>CP-1</code> 次，数据量与 <code>S/CP × hidden</code> 成正比；由于是点对点传输，可以拆成小块与计算重叠，不需要全局同步。这是 Ring Attention 在超长序列上仍然可用的原因。<a class="inline-link" href="https://arxiv.org/abs/2310.01889" target="_blank" rel="noopener noreferrer">Ring Attention 论文</a></p>
+第 1 轮：每张卡用本地 KV 计算局部注意力
+第 2 轮：KV 传给下一张卡，继续计算
+……
+第 CP 轮：所有 KV 块都参与过一次计算</code></pre></figure>
+<p>softmax 不能直接分段相加。Ring Attention 使用 online softmax：每算完一块 KV，就更新当前的最大值和归一化因子，把新块的贡献合并进来。这样不需要保存完整的 <code>S × S</code> 注意力矩阵，显存从 <code>O(S²)</code> 降到 <code>O(S)</code>，计算与通信可以重叠：当前块的注意力在计算，下一块 KV 已经在传输。</p>
+<p>每张卡把本地 KV 传 <code>CP-1</code> 次，数据量与 <code>S/CP × hidden</code> 成正比。传输使用点对点（P2P）通信，可以拆成小块与计算重叠，不需要全局同步。这是 Ring Attention 在超长序列上仍可用的原因。<a class="inline-link" href="https://arxiv.org/abs/2310.01889" target="_blank" rel="noopener noreferrer">Ring Attention 论文</a></p>
 </section>
-<section id="section-3"><h3>DeepSpeed Ulysses：用 All-to-All 换头维</h3>
-<p>Ulysses 走另一条路。它不传 KV，而是重新排列 Q/K/V 的布局：先把序列维切分、头维完整，做一次 All-to-All，变成“序列完整、头维切分”；每张卡只计算一部分头，但能看到完整序列；算完再 All-to-All 换回原来的布局。</p>
+<section id="section-4"><h3>DeepSpeed Ulysses</h3>
+<p>Ulysses 不传递 KV，而是重新排列 Q、K、V 的布局。它先沿序列维切分、头维完整，执行一次 All-to-All，变成“序列完整、头维切分”；每张卡只计算一部分头，但能看到完整序列；计算完成后，再执行一次 All-to-All 换回原布局。</p>
 <figure class="engine-code"><figcaption>代码片段 <span>text</span></figcaption><pre><code>切分前：每张卡 [S/CP, H]        —— 序列切分，头完整
 All-to-All：交换序列块与头块
 切分后：每张卡 [S, H/CP]        —— 序列完整，头切分
 计算注意力：每张卡负责 H/CP 个头
 All-to-All：换回 [S/CP, H]</code></pre></figure>
-<p>这样注意力的计算本身不需要跨卡，每张卡在自己的头上做完整的 <code>S × S</code> 注意力；通信集中在两次 All-to-All 上，一次换过去、一次换回来。Ulysses 的通信量比 Ring Attention 更集中，适合有高带宽互联的集群；缺点是头数必须能被 CP 整除，而且 All-to-All 是全局同步，重叠难度更高。<a class="inline-link" href="https://arxiv.org/abs/2309.14509" target="_blank" rel="noopener noreferrer">DeepSpeed Ulysses 论文</a></p>
+<p>注意力计算本身不需要跨卡，每张卡在自己的头上执行完整的 <code>S × S</code> 注意力；通信集中在两次 All-to-All 上。Ulysses 的通信更集中，适合具有高带宽互联的集群；约束是头数必须能被 CP 整除，且 All-to-All 是全局同步，重叠难度高于 Ring Attention 的 P2P。<a class="inline-link" href="https://arxiv.org/abs/2309.14509" target="_blank" rel="noopener noreferrer">DeepSpeed Ulysses 论文</a></p>
 <figure class="engine-figure"><a href="images/cp-ring.svg" target="_blank" rel="noopener noreferrer" aria-label="打开完整示意图"><img src="images/cp-ring.svg" alt="Ring Attention 与 Ulysses 的对比：Ring 沿环传递 KV 块并与计算重叠，Ulysses 用两次 All-to-All 在序列维和头维之间重排。"></a><figcaption>Ring Attention 与 Ulysses 的对比：Ring 沿环传递 KV 块并与计算重叠，Ulysses 用两次 All-to-All 在序列维和头维之间重排。 点击可打开完整图片。</figcaption></figure>
-<p>Megatron 的上下文并行更接近 Ring Attention：沿序列维切分，注意力通过 P2P 交换 KV，支持 causal mask，并可以和 TP、PP、DP 组合。NVIDIA 的文档把 CP 定位为“序列长度 8K 以上”的并行维度，并指出 CP 的通信量与 TP 同量级但通常更低。<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Megatron Core · Parallelism Guide</a></p>
+<p>示意图中左侧面板是 Ring Attention。四个 GPU 排列成环，箭头从 GPU 0 指向 GPU 1、从 GPU 1 指向 GPU 2，依此类推，标注 <code>K/V</code> 表示传递的是键值块。右侧面板是 Ulysses。上排四个框的形状为 <code>[S/4, H]</code>，表示序列切分、头完整；箭头向下进入 <code>All-to-All #1</code>；下排四个框变为 <code>[S, H/4]</code>，表示序列完整、头切分。底部的虚线箭头表示第二次 All-to-All，将布局换回原状。</p>
 </section>
-<section id="section-4"><h3>负载均衡：causal mask 带来的麻烦</h3>
-<p>自回归注意力的 causal mask 让计算量呈三角形分布：前面的 token 要 attend 到更多位置，后面的 token 更少。如果简单地把序列切成连续几段，第一段负责的 query 少、KV 多，最后一段 query 多、KV 少，各 rank 的计算量并不相等。</p>
-<p>常见解法是 zigzag 切分：把序列按块编号，rank 0 拿第 1 块和最后 1 块，rank 1 拿第 2 块和倒数第 2 块，以此类推，使每张卡分到的“query 数 × KV 数”大致相等。这个细节在 Ring Attention 和 Megatron CP 的实现里都存在，长序列训练时不做负载均衡，CP 的加速比会明显低于线性。</p>
+<section id="section-5"><h3>Megatron 上下文并行</h3>
+<p>Megatron 的上下文并行更接近 Ring Attention：沿序列维切分，注意力通过 P2P 交换 KV，支持因果掩码（causal mask），并可与 TP、PP、DP 组合。NVIDIA 文档将 CP 定位为序列长度 8K 以上的并行维度，并指出同样大小的张量下，CP 的通信量通常低于 TP。<a class="inline-link" href="https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html" target="_blank" rel="noopener noreferrer">Megatron Core · Parallelism Guide</a></p>
 </section>
-<section id="section-5"><h3>CP 与 TP 的关系</h3>
-<p>两者都在切激活，但切的维度不同：</p>
+<section id="section-6"><h3>负载均衡与显存</h3>
+<p>自回归注意力的 causal mask 使计算量呈三角形分布：前面的 token 需要 attend 到更多位置，后面的 token 更少。若简单地把序列切成连续几段，各 rank 的计算量并不相等。</p>
+<p>常见解法是 zigzag 切分：把序列按块编号，rank 0 取第 1 块和最后 1 块，rank 1 取第 2 块和倒数第 2 块，依此类推，使每张卡分到的“query 数 × KV 数”大致相等。Ring Attention 和 Megatron CP 的实现都采用这一策略。长序列训练中若不做负载均衡，CP 的加速比会明显低于线性。</p>
+<p>CP 的显存收益与切分段数成正比，但每张卡仍需要保存交换过程中的 KV 缓冲。序列切成过多段时，每段 token 太少，注意力计算的算术强度下降，通信占比上升。CP 度需要与序列长度、头数和网络带宽共同确定。</p>
+</section>
+<section id="section-7"><h3>CP 与 TP 的关系</h3>
 <div class="table-scroll"><table>
 <thead>
 <tr>
 <th>维度</th>
-<th>切什么</th>
-<th>注意力是否需要跨卡</th>
+<th>切分对象</th>
+<th>注意力是否跨卡</th>
 <th>主要通信</th>
 <th>适用场景</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>TP</td>
-<td>hidden / head 维</td>
+<td>hidden 或 head 维</td>
 <td>是，每个头被切开</td>
 <td>每层 All-Reduce</td>
 <td>层放不下，hidden 大</td>
@@ -157,38 +166,41 @@ All-to-All：换回 [S/CP, H]</code></pre></figure>
 <td>序列维（整个 Transformer）</td>
 <td>是，交换 KV</td>
 <td>P2P 或 All-to-All</td>
-<td>序列很长（8K+）</td>
+<td>序列很长（8K 以上）</td>
 </tr>
 </tbody></table></div>
-<p>NVIDIA NeMo 的性能指南给了一个有用的判断：当序列长度显著大于 hidden size 时，激活值会先爆，这时 CP 比继续加大 TP 更有效；同样大小的张量，CP 的通信量通常低于 TP。<a class="inline-link" href="https://docs.nvidia.com/nemo-framework/user-guide/25.09/performance/performance-guide.html" target="_blank" rel="noopener noreferrer">Performance Tuning Guide</a></p>
-<p>Megatron SP 和 CP 可以同时使用：SP 在 TP 组内切逐点激活，CP 在更外层切整条序列。真实的长上下文训练配置里，常见的是 <code>TP × CP × PP × DP</code> 的组合，CP 通常放在节点内或相邻节点，因为 KV 交换的带宽需求较高。</p>
+<p>NVIDIA NeMo 的性能指南给出判断依据：当序列长度显著大于 hidden size 时，激活值会先成为瓶颈，此时 CP 比继续加大 TP 更有效；同样大小的张量，CP 的通信量通常低于 TP。<a class="inline-link" href="https://docs.nvidia.com/nemo-framework/user-guide/25.09/performance/performance-guide.html" target="_blank" rel="noopener noreferrer">Performance Tuning Guide</a></p>
+<p>Megatron SP 和 CP 可以同时使用：SP 在 TP 组内切逐点激活，CP 在更外层切整条序列。长上下文训练配置常见 <code>TP × CP × PP × DP</code> 的组合，CP 通常放在节点内或相邻节点，因为 KV 交换对带宽要求较高。</p>
 </section>
-<section id="section-6"><h3>推理中的长上下文</h3>
-<p>训练里的 CP 主要解决激活值；推理里的瓶颈换成了 KV Cache。长上下文推理时，KV Cache 随 <code>seq × batch</code> 线性增长，可能比模型权重还大。这时有几种思路：</p>
+<section id="section-8"><h3>推理中的长上下文</h3>
+<p>训练中的 CP 主要解决激活值；推理中的主要瓶颈是键值缓存（KV Cache）。长上下文推理时，KV Cache 随 <code>seq × batch</code> 线性增长，可能超过模型权重。推理系统采用以下三类方法：</p>
 <ul>
-<li><strong>TP/EP 切 KV Cache</strong>：把 KV 头或层切到多张卡上，每张卡只保存一部分 KV；</li>
-<li><strong>CP 切 prefill</strong>：长 prompt 的 prefill 阶段把序列切开，并行计算注意力，缩短首 token 延迟；</li>
-<li><strong>PagedAttention 管理 KV</strong>：不切并行度，而是把 KV 分页存储，减少碎片和重复。</li>
+<li><strong>TP/EP 切分 KV Cache</strong>：把 KV 头或层切到多张卡上，每张卡只保存一部分 KV；</li>
+<li><strong>CP 切分预填充（prefill）</strong>：长 prompt 的预填充阶段把序列切开，并行计算注意力，缩短首 token 延迟；</li>
+<li><strong>PagedAttention 管理 KV</strong>：不切并行度，把 KV 分页存储，减少碎片和重复。</li>
 </ul>
-<p>decode 阶段每步只生成一个 token，序列维的并行收益有限，反而增加通信；所以生产系统通常只在 prefill 或超长上下文场景使用 CP，decode 更依赖 TP/EP 和 KV Cache 管理。这个取舍与 DeepSeek 把 prefill、decode 分开部署的思路一致。</p>
+<p>解码（decode）阶段每步只生成一个 token，序列维并行的收益有限，通信反而增加。生产系统通常只在 prefill 或超长上下文场景使用 CP，decode 更依赖 TP/EP 和 KV Cache 管理。DeepSeek 将 prefill 与 decode 分离部署，原因之一就是两阶段的并行瓶颈不同。</p>
 </section>
-<section id="section-7"><h3>什么时候用 CP</h3>
-<p>适合 CP 的信号：</p>
+<section id="section-9"><h3>限制与适用条件</h3>
+<p>CP 适合以下条件：</p>
 <ul>
 <li>序列长度 8K 以上，激活值成为显存瓶颈；</li>
-<li>hidden size 不够大，继续加 TP 的收益已经很低；</li>
-<li>有支持 CP 的注意力内核（Ring Attention、Megatron CP、Ulysses）；</li>
+<li>hidden size 不够大，继续增加 TP 的收益已经很低；</li>
+<li>框架和注意力内核支持 CP（Ring Attention、Megatron CP 或 Ulysses）；</li>
 <li>序列长度能被 CP 整除，且能处理 causal mask 的负载不均。</li>
 </ul>
-<p>不适合 CP 的信号：</p>
+<p>CP 不适合以下条件：</p>
 <ul>
-<li>序列很短，CP 的通信和调度开销超过收益；</li>
+<li>序列很短，通信和调度开销超过收益；</li>
 <li>头数太少，Ulysses 的 All-to-All 无法均分；</li>
-<li>框架不支持 CP 的注意力实现，只能退化成低效的全局 All-Gather；</li>
+<li>框架不支持 CP 的注意力实现，只能退化为全局 All-Gather；</li>
 <li>推理 decode 阶段，序列维并行没有足够的工作量。</li>
 </ul>
 </section>
-<section id="section-8"><h3>参考资料</h3>
+<section id="section-10"><h3>结论</h3>
+<p>上下文并行沿序列维切分长序列，通过交换 KV 完成注意力。Ring Attention 用 P2P 传递 KV 块并与计算重叠，Ulysses 用两次 All-to-All 在序列维与头维之间重排，Megatron CP 采用前者并支持 causal mask 与负载均衡。CP 降低长序列的激活值，但要求足够长的序列和合适的注意力内核；推理中它主要用于 prefill，decode 更依赖 KV Cache 分片与分页管理。</p>
+</section>
+<section id="section-11"><h3>参考资料</h3>
 <ul>
 <li>Liu et al.，<a class="inline-link" href="https://arxiv.org/abs/2310.01889" target="_blank" rel="noopener noreferrer">Ring Attention with Blockwise Transformers for Near-Infinite Context</a></li>
 <li>Jacobs et al.，<a class="inline-link" href="https://arxiv.org/abs/2309.14509" target="_blank" rel="noopener noreferrer">DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models</a></li>
@@ -202,8 +214,8 @@ All-to-All：换回 [S/CP, H]</code></pre></figure>
 </ul>
 </section>
             <div class="reader-actions"><a href="index.html">返回并行专题目录</a>
-<a href="05-expert-parallel.html">上一篇：专家并行：MoE 的 All-to-All 与负载均衡</a>
-<a href="07-combination.html">下一篇：组合与选型：3D/4D 并行怎样落到集群</a></div>
+<a href="05-expert-parallel.html">上一篇：专家并行：MoE 路由、All-to-All 与负载均衡</a>
+<a href="07-combination.html">下一篇：并行组合与选型：约束、配置与排障</a></div>
           </article>
         </div>
       </main>
